@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
 <meta charset="utf-8" />
-<title>Interaktywny labirynt — generator + solver (animacja)</title>
+<title>Interaktywny labirynt — generator + solver (animacja) — poprawiony</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
   :root{
@@ -30,9 +30,9 @@
 <body>
 <div class="wrap">
   <div class="panel">
-    <h2>Labirynt — generator & solver</h2>
+    <h2>Labirynt — generator & solver (poprawiony)</h2>
 
-    <label>Rozmiar (komórki) <input id="cellsInput" type="number" value="40" min="6" max="160" /></label>
+    <label>Rozmiar (szer. komórki) <input id="cellsInput" type="number" value="40" min="6" max="160" /></label>
     <label>Wysokość (komórki) <input id="rowsInput" type="number" value="28" min="6" max="120" /></label>
 
     <label>Kształt
@@ -69,8 +69,8 @@
       <button id="exportBtn" class="secondary">Eksportuj SVG</button>
     </div>
 
-    <div class="small">Sterowanie: kliknij na canvas, aby ustawić punkt startu (zielony) i koniec (niebieski). Domyślnie start = górny otwór, koniec = dolny otwór.</div>
-    <div class="footer">Wzór inspirowany krótkim filmikiem — animacja generowania + kolorowanie odwiedzin + solver.</div>
+    <div class="small">Kliknij canvas, aby ustawić start (pierwszy klik) i koniec (drugi klik). Domyślnie wejście = górna otwarta komórka, wyjście = dolna.</div>
+    <div class="footer">Poprawka: algorytm DFS teraz łączy wszystkie dozwolone komórki (obsługa masek).</div>
   </div>
 
   <div style="flex:1;display:flex;flex-direction:column;gap:12px;align-items:center">
@@ -83,13 +83,6 @@
 </div>
 
 <script>
-/*
-Interactive maze visualizer
-- Grid representation: 2*h+1 x 2*w+1 (0 = passage, 1 = wall)
-- Animated recursive backtracker / growing tree / kruskal
-- BFS and A* solvers with animation
-*/
-
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d', {alpha:false});
 let cw = canvas.width, ch = canvas.height;
@@ -112,17 +105,14 @@ const statsEl = document.getElementById('stats');
 const metricsEl = document.getElementById('metrics');
 
 let maze = null;
-let animating = false;
 let paused = false;
 let cellSize = 18;
 let startGrid = null;
 let goalGrid = null;
 
-// Utility
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 function rng(){ return Math.random(); }
 
-// Maze class (simple)
 class Maze {
   constructor(w,h,maskFunc=null){
     this.w = w; this.h = h;
@@ -145,39 +135,24 @@ class Maze {
   removeWallBetween(a,b){
     const [ar,ac]=a, [br,bc]=b;
     const [gar,gac]=this.cellToGrid(ar,ac), [gbr,gbc]=this.cellToGrid(br,bc);
-    const wr = (gar+gbr)/2, wc = (gac+gbc)/2;
-    this.grid[wr|0][wc|0] = 0;
-  }
-  setEntranceAndExit(){
-    // top center and bottom center on grid (try to find first open)
-    // top
-    for(let c=1;c<this.grid_w-1;c++){
-      if(this.grid[1][c]===0){ startGrid=[0,c]; break; }
-    }
-    for(let c=this.grid_w-2;c>0;c--){
-      if(this.grid[this.grid_h-2][c]===0){ goalGrid=[this.grid_h-1,c]; break; }
-    }
-    // ensure openings
-    if(startGrid) this.grid[startGrid[0]][startGrid[1]] = 0;
-    if(goalGrid) this.grid[goalGrid[0]][goalGrid[1]] = 0;
+    const wr = (gar+gbr)/2 | 0, wc = (gac+gbc)/2 | 0;
+    this.grid[wr][wc] = 0;
   }
 }
 
-// Draw
+// Drawing
 function drawMaze(m, highlightSet=null, path=null){
   ctx.clearRect(0,0,cw,ch);
-  // background
   ctx.fillStyle = '#071022';
   ctx.fillRect(0,0,cw,ch);
+  if(!m) return;
   const H = m.grid_h, W = m.grid_w;
-  // determine cell size to fit canvas
   const pad = 6;
   const maxCell = Math.floor(Math.min((cw - pad*2) / W, (ch - pad*2) / H));
   const cs = Math.max(4, Math.min(cellSize, maxCell));
   const ox = Math.floor((cw - W*cs)/2);
   const oy = Math.floor((ch - H*cs)/2);
 
-  // draw cells
   for(let r=0;r<H;r++){
     for(let c=0;c<W;c++){
       const v = m.grid[r][c];
@@ -191,7 +166,6 @@ function drawMaze(m, highlightSet=null, path=null){
       }
     }
   }
-  // highlights (visited)
   if(highlightSet){
     for(const k of highlightSet){
       const [r,c]=k.split(',').map(Number);
@@ -199,14 +173,12 @@ function drawMaze(m, highlightSet=null, path=null){
       ctx.fillRect(ox + c*cs, oy + r*cs, cs, cs);
     }
   }
-  // path
   if(path){
     for(const [r,c] of path){
       ctx.fillStyle = 'rgba(255,0,0,0.9)';
       ctx.fillRect(ox + c*cs + cs*0.15, oy + r*cs + cs*0.15, cs*0.7, cs*0.7);
     }
   }
-  // start/goal
   if(startGrid){
     const [sr,sc] = startGrid;
     ctx.fillStyle = '#16a34a';
@@ -219,53 +191,114 @@ function drawMaze(m, highlightSet=null, path=null){
   }
 }
 
-// Animated generators
-async function generateDFS(m, speedFactor=1, strategy="last", mix=0.9){
+// Utility shuffle
+function shuffle(arr){
+  for(let i=arr.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+}
+
+// throttling
+function throttle(speedFactor){
+  const base = 8;
+  const mv = Math.max(0.05, speedFactor);
+  return sleep(base / mv);
+}
+
+/* ====== POPRAWIONA FUNKCJA GENERUJĄCA (DFS / Growing Tree) ======
+   Uwaga: obsługuje maski. Gwarantuje, że wszystkie dozwolone komórki
+   zostaną połączone (łączenie komponentów) — dzięki temu labirynt
+   będzie spójny / rozwiązywalny, o ile wejście/wyjście leżą w tym
+   spójnym obszarze.
+*/
+async function generateDFS_fullcoverage(m, speedFactor=1, strategy='last'){
   statsEl.textContent = 'Status: generowanie (DFS / Growing Tree)...';
   const visited = new Set();
-  if(m.cells.length===0) return;
-  const start = m.cells[Math.floor(rng()*m.cells.length)];
-  const stack = [start];
-  visited.add(start.join(','));
+  if(!m || m.cells.length===0) return;
+
+  // pomoc: zbiór wszystkich cell-key
+  const keyOf = (cell)=> `${cell[0]},${cell[1]}`;
+
+  // start z losowej komórki
+  let startCell = m.cells[Math.floor(rng()*m.cells.length)];
+  const stack = [startCell];
+  visited.add(keyOf(startCell));
   const highlights = new Set();
-  while(stack.length && !paused){
-    // pick index by strategy
+
+  while((stack.length > 0 || visited.size < m.cells.length) && !paused){
+    if(stack.length === 0){
+      // są nieodwiedzone komórki — wybierz jedną losową i połącz z odwiedzonym sąsiadem (jeśli taki istnieje)
+      const unvisited = m.cells.filter(c => !visited.has(keyOf(c)));
+      const next = unvisited[Math.floor(rng()*unvisited.length)];
+      // znajdź odwiedzonych sąsiadów next
+      const nbrsVisited = [];
+      for(const d of [[-1,0],[1,0],[0,-1],[0,1]]){
+        const nr = next[0]+d[0], nc = next[1]+d[1];
+        if(m.inBoundsCell(nr,nc) && visited.has(`${nr},${nc}`)){
+          nbrsVisited.push([nr,nc]);
+        }
+      }
+      if(nbrsVisited.length > 0){
+        // połącz z losowym odwiedzonym sąsiadem, żeby zachować spójność
+        const chosen = nbrsVisited[Math.floor(rng()*nbrsVisited.length)];
+        m.removeWallBetween(chosen, next);
+        visited.add(keyOf(next));
+        stack.push(next);
+        highlights.add(keyOf(chosen));
+        highlights.add(keyOf(next));
+      } else {
+        // brak odwiedzonych sąsiadów (izolowany fragment maski) — po prostu zacznij nowy "drzewo"
+        visited.add(keyOf(next));
+        stack.push(next);
+        highlights.add(keyOf(next));
+      }
+      drawMaze(m, highlights);
+      await throttle(speedFactor * 0.8);
+      continue;
+    }
+
+    // wybór komórki ze stosu wg strategii
     let idx;
     if(typeof strategy === 'number'){
       idx = (rng() < strategy) ? stack.length-1 : Math.floor(rng()*stack.length);
     } else if(strategy === 'last') idx = stack.length-1;
     else if(strategy === 'random') idx = Math.floor(rng()*stack.length);
+    else if(strategy === 'first') idx = 0;
     else idx = stack.length-1;
+
     const cell = stack[idx];
     const [r,c] = cell;
-    // find neighbors
-    const neigh = [];
-    const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
-    for(const d of dirs){
-      const nr=r+d[0], nc=c+d[1];
-      if(m.inBoundsCell(nr,nc) && !visited.has([nr,nc].join(','))) neigh.push([nr,nc]);
+    // znajdź nieodwiedzonych sąsiadów
+    const neighbors = [];
+    for(const d of [[-1,0],[1,0],[0,-1],[0,1]]){
+      const nr = r + d[0], nc = c + d[1];
+      if(m.inBoundsCell(nr,nc) && !visited.has(`${nr},${nc}`)){
+        neighbors.push([nr,nc]);
+      }
     }
-    if(neigh.length){
-      const nb = neigh[Math.floor(rng()*neigh.length)];
-      m.removeWallBetween(cell, nb);
-      visited.add(nb.join(','));
+    if(neighbors.length > 0){
+      const nb = neighbors[Math.floor(rng()*neighbors.length)];
+      m.removeWallBetween([r,c], nb);
+      visited.add(keyOf(nb));
       stack.push(nb);
+      highlights.add(keyOf(nb));
+      highlights.add(keyOf([r,c]));
     } else {
       stack.splice(idx,1);
     }
-    // highlight some visited cells
-    highlights.add(cell.join(','));
-    drawMaze(m, highlights);
+    // rysuj fragmenty podczas pracy
+    if(Math.random() < 0.08) drawMaze(m, highlights);
     await throttle(speedFactor);
   }
+
   drawMaze(m);
-  statsEl.textContent = 'Status: wygenerowano';
+  statsEl.textContent = 'Status: wygenerowano (DFS pełne pokrycie)';
 }
 
-// Kruskal (instant, but we animate a bit)
+/* ====== KRUSKAL ====== (jest OK; zostawiam prawie bez zmian) */
 async function generateKruskal(m, speedFactor=1){
   statsEl.textContent = 'Status: generowanie (Kruskal)...';
-  // build edges
   const edges = [];
   for(const [r,c] of m.cells){
     [[0,1],[1,0]].forEach(d=>{
@@ -278,62 +311,52 @@ async function generateKruskal(m, speedFactor=1){
   for(const cell of m.cells) parent.set(cell.join(','), cell.join(','));
   function find(u){
     let p = parent.get(u);
-    if(p!==u){ p = find(p); parent.set(u,p); }
+    if(p !== u){
+      p = find(p);
+      parent.set(u,p);
+    }
     return p;
   }
   function union(a,b){
-    const ra=find(a), rb=find(b);
-    if(ra===rb) return false;
-    parent.set(rb,ra); return true;
+    const ra = find(a), rb = find(b);
+    if(ra === rb) return false;
+    parent.set(rb, ra);
+    return true;
   }
   const highlights = new Set();
   for(const [a,b] of edges){
-    if(!paused){
-      if(union(a.join(','), b.join(','))){
-        m.removeWallBetween(a,b);
-        highlights.add(a.join(','));
-        highlights.add(b.join(','));
-      }
-      if(Math.random() < 0.02) drawMaze(m, highlights);
-      await throttle(speedFactor*0.5);
+    if(paused) { await throttle(speedFactor*0.5); continue; }
+    const ak = a.join(','), bk = b.join(',');
+    if(union(ak, bk)){
+      m.removeWallBetween(a,b);
+      highlights.add(ak); highlights.add(bk);
     }
+    if(Math.random() < 0.03) drawMaze(m, highlights);
+    await throttle(speedFactor * 0.4);
   }
   drawMaze(m);
-  statsEl.textContent = 'Status: wygenerowano';
+  statsEl.textContent = 'Status: wygenerowano (Kruskal)';
 }
 
-// helper: random shuffle
-function shuffle(arr){
-  for(let i=arr.length-1;i>0;i--){
-    const j = Math.floor(Math.random()*(i+1));
-    [arr[i],arr[j]]=[arr[j],arr[i]];
-  }
-}
-
-// throttle based on speed slider
-function throttle(speedFactor){
-  const base = 8; // ms baseline
-  const mv = Math.max(0.1, speedFactor);
-  return sleep(base / mv);
-}
-
-// BFS solver (animated)
+/* ====== SOLVERY (BFS + A*) - bez zmian logicznych, ale dodane komunikaty) ====== */
 async function bfsSolve(m, speedFactor=1){
+  if(!m){ statsEl.textContent='Brak labiryntu'; return; }
+  if(!startGrid || !goalGrid){ statsEl.textContent='Ustaw start i cel (kliknij canvas)'; return; }
   statsEl.textContent = 'Status: rozwiązywanie (BFS)...';
   const H=m.grid_h, W=m.grid_w;
-  const start = startGrid; const goal = goalGrid;
-  if(!start || !goal){ statsEl.textContent='Ustaw start/goal (kliknij canvas)'; return; }
+  const start = startGrid, goal = goalGrid;
   const q=[]; q.push(start);
   const parent = new Map();
   parent.set(start.join(','), null);
-  const vis = new Set(); vis.add(start.join(','));
+  const visited = new Set();
+  visited.add(start.join(','));
   const highlights = new Set();
+
   while(q.length && !paused){
     const cur = q.shift();
-    const [r,c]=cur;
     if(cur[0]===goal[0] && cur[1]===goal[1]) break;
     for(const d of [[-1,0],[1,0],[0,-1],[0,1]]){
-      const nr=r+d[0], nc=c+d[1];
+      const nr = cur[0]+d[0], nc = cur[1]+d[1];
       if(nr>=0 && nr<H && nc>=0 && nc<W && m.grid[nr][nc]===0){
         const key = `${nr},${nc}`;
         if(!parent.has(key)){
@@ -343,21 +366,21 @@ async function bfsSolve(m, speedFactor=1){
         }
       }
     }
-    drawMaze(m, highlights);
+    if(Math.random() < 0.04) drawMaze(m, highlights);
     await throttle(speedFactor*0.7);
   }
-  // build path
+
+  const goalKey = goal.join(',');
+  if(!parent.has(goalKey)){ statsEl.textContent='Brak ścieżki (niepołączone komponenty?)'; return; }
   const path=[];
-  let key = goal.join(',');
-  if(!parent.has(key)){ statsEl.textContent='Brak ścieżki'; return; }
+  let key = goalKey;
   while(key){
     const [rr,cc] = key.split(',').map(Number);
     path.push([rr,cc]);
     key = parent.get(key);
   }
   path.reverse();
-  statsEl.textContent = 'Status: odnaleziono trasę';
-  // animate path
+  statsEl.textContent = 'Status: odnaleziono trasę (BFS)';
   for(let i=0;i<path.length && !paused;i++){
     drawMaze(m, null, path.slice(0,i+1));
     await throttle(speedFactor*2);
@@ -365,20 +388,21 @@ async function bfsSolve(m, speedFactor=1){
   drawMaze(m, null, path);
 }
 
-// A* solver (grid Manhattan)
-function heuristic(a,b){ return Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1]); }
+function heuristic(a,b){ return Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]); }
 async function aStarSolve(m, speedFactor=1){
+  if(!m){ statsEl.textContent='Brak labiryntu'; return; }
+  if(!startGrid || !goalGrid){ statsEl.textContent='Ustaw start i cel (kliknij canvas)'; return; }
   statsEl.textContent = 'Status: rozwiązywanie (A*)...';
-  const start = startGrid, goal = goalGrid;
-  if(!start || !goal){ statsEl.textContent='Ustaw start/goal (kliknij canvas)'; return; }
   const H=m.grid_h, W=m.grid_w;
-  const open = new Set();
-  const g = new Map(); const f = new Map(); const parent = new Map();
+  const start = startGrid, goal = goalGrid;
   const keyStart = start.join(','), keyGoal = goal.join(',');
-  g.set(keyStart, 0); f.set(keyStart, heuristic(start,goal)); open.add(keyStart);
+  const open = new Set(); open.add(keyStart);
+  const g = new Map(); const f = new Map(); const parent = new Map();
+  g.set(keyStart, 0); f.set(keyStart, heuristic(start,goal));
+
   const visited = new Set();
   while(open.size && !paused){
-    // pick best f
+    // wybierz najlepsze f
     let curKey = null, best = Infinity;
     for(const k of open){
       const fv = f.get(k) ?? Infinity;
@@ -401,12 +425,13 @@ async function aStarSolve(m, speedFactor=1){
         }
       }
     }
-    drawMaze(m, visited);
-    await throttle(speedFactor*0.8);
+    if(Math.random() < 0.04) drawMaze(m, visited);
+    await throttle(speedFactor*0.9);
   }
-  if(!parent.has(keyGoal)){ statsEl.textContent='Brak ścieżki'; return; }
-  // build path
-  const path=[]; let k=keyGoal;
+
+  if(!parent.has(keyGoal) && keyStart !== keyGoal){ statsEl.textContent='Brak ścieżki (A*)'; return; }
+  // odtwórz ścieżkę (jeśli start==goal, to zwróci jedynie ten punkt)
+  const path=[]; let k = keyGoal;
   while(k){
     path.unshift(k.split(',').map(Number));
     k = parent.get(k);
@@ -419,22 +444,16 @@ async function aStarSolve(m, speedFactor=1){
   drawMaze(m, null, path);
 }
 
-// Add random loops
+/* ====== Dodawanie pętli i eksport SVG (jak wcześniej) ====== */
 function addLoops(m, percent=0.02){
   const H=m.grid_h, W=m.grid_w;
   let removed=0;
   for(let r=1;r<H-1;r++){
     for(let c=1;c<W-1;c++){
-      if(m.grid[r][c]===1){
-        // check if it's a wall between two passages (i.e., coordinate of wall)
-        // wall coords are even/odd mix
-        // simpler: randomly remove some walls that are between two passages
-        if(Math.random() < percent){
-          // check neighbors to ensure removing creates small passage
-          const neighPass = (m.grid[r-1][c]===0)+(m.grid[r+1][c]===0)+(m.grid[r][c-1]===0)+(m.grid[r][c+1]===0);
-          if(neighPass>=2 && neighPass<=3){
-            m.grid[r][c]=0; removed++;
-          }
+      if(m.grid[r][c]===1 && Math.random() < percent){
+        const neighPass = (m.grid[r-1][c]===0) + (m.grid[r+1][c]===0) + (m.grid[r][c-1]===0) + (m.grid[r][c+1]===0);
+        if(neighPass>=2 && neighPass<=3){
+          m.grid[r][c]=0; removed++;
         }
       }
     }
@@ -442,8 +461,8 @@ function addLoops(m, percent=0.02){
   return removed;
 }
 
-// Export as simple SVG (grid rectangles)
 function exportSVG(m){
+  if(!m) return;
   const H=m.grid_h, W=m.grid_w;
   const cs = 6;
   const width = W*cs, height = H*cs;
@@ -464,7 +483,7 @@ function exportSVG(m){
   URL.revokeObjectURL(url);
 }
 
-// Canvas click to set start/goal
+/* ====== Interakcje canvas ====== */
 canvas.addEventListener('click', (ev)=>{
   if(!maze) return;
   const rect = canvas.getBoundingClientRect();
@@ -476,31 +495,22 @@ canvas.addEventListener('click', (ev)=>{
   const oy = Math.floor((ch - H*cs)/2);
   const gc = Math.floor((x - ox)/cs), gr = Math.floor((y - oy)/cs);
   if(gr>=0 && gr<H && gc>=0 && gc<W && maze.grid[gr][gc]===0){
-    // alternate setting start/goal
     if(!startGrid || (startGrid && goalGrid)) { startGrid=[gr,gc]; goalGrid=null; }
     else if(startGrid && !goalGrid) goalGrid = [gr,gc];
     drawMaze(maze);
   }
 });
 
-// control handlers
-genBtn.addEventListener('click', async ()=>{
-  paused = false;
-  await startGeneration();
-});
-pauseBtn.addEventListener('click', ()=>{
-  paused = !paused;
-  pauseBtn.textContent = paused ? 'Wznów' : 'Pauza';
-  statsEl.textContent = paused ? 'Status: pauza' : 'Status: działanie';
-});
+/* ====== Kontrolki ====== */
+genBtn.addEventListener('click', async ()=>{ paused=false; await startGeneration(); });
+pauseBtn.addEventListener('click', ()=>{ paused = !paused; pauseBtn.textContent = paused ? 'Wznów' : 'Pauza'; statsEl.textContent = paused ? 'Status: pauza' : 'Status: działanie'; });
 solveBtn.addEventListener('click', async ()=>{ paused=false; if(maze) await bfsSolve(maze, Number(speedInput.value)); });
 solveAstarBtn.addEventListener('click', async ()=>{ paused=false; if(maze) await aStarSolve(maze, Number(speedInput.value)); });
-addLoopsBtn.addEventListener('click', ()=>{ if(maze){ addLoops(maze, 0.02); drawMaze(maze); }});
+addLoopsBtn.addEventListener('click', ()=>{ if(maze){ addLoops(maze, 0.02); drawMaze(maze); computeMetrics(); }});
 exportBtn.addEventListener('click', ()=>{ if(maze) exportSVG(maze); });
 
-// main generation orchestrator
+/* ====== Orkiestrator generacji ====== */
 async function startGeneration(){
-  // build mask if circle
   const w = Number(cellsInput.value)|0;
   const h = Number(rowsInput.value)|0;
   let mask = null;
@@ -512,7 +522,6 @@ async function startGeneration(){
     };
   }
   maze = new Maze(w,h,mask);
-  // set canvas dims adaptively
   cw = Math.min(window.innerWidth - 380, Math.max(600, w*18));
   ch = Math.min(window.innerHeight - 60, Math.max(360, h*18));
   canvas.width = cw; canvas.height = ch;
@@ -521,18 +530,16 @@ async function startGeneration(){
   startGrid = null; goalGrid = null;
 
   const speedFactor = Number(speedInput.value) || 1;
-  // choose generator
   const gen = genSelect.value;
   paused = false;
   if(gen === 'dfs' || gen === 'growing'){
-    const strat = (gen==='dfs') ? 'last' : 'number';
     const strategy = (gen==='growing') ? Number(mixP.value) : 'last';
-    await generateDFS(maze, speedFactor, strategy, Number(mixP.value));
+    await generateDFS_fullcoverage(maze, speedFactor, strategy);
   } else if(gen === 'kruskal'){
     await generateKruskal(maze, speedFactor);
   }
-  // set entrances
-  // open top/bottom passage
+
+  // ustawienie wejścia/wyjścia (górna i dolna otworzona komórka)
   for(let c=1;c<maze.grid_w-1;c++){
     if(maze.grid[1][c]===0){ startGrid=[0,c]; break; }
   }
@@ -542,31 +549,22 @@ async function startGeneration(){
   if(startGrid) maze.grid[startGrid[0]][startGrid[1]] = 0;
   if(goalGrid) maze.grid[goalGrid[0]][goalGrid[1]] = 0;
   drawMaze(maze);
-  // compute some metrics
   computeMetrics();
 }
 
-// compute simple metrics
+/* ====== Metryki ====== */
 function computeMetrics(){
   if(!maze) return;
   const H=maze.grid_h, W=maze.grid_w;
-  // build cell graph (cell centers)
   const centers = [];
-  const mapIndex = new Map();
-  let idx=0;
-  for(let r=1;r<H;r+=2) for(let c=1;c<W;c+=2){
-    if(maze.grid[r][c]===0){ centers.push([r,c]); mapIndex.set(`${r},${c}`, idx++); }
-  }
+  for(let r=1;r<H;r+=2) for(let c=1;c<W;c+=2) if(maze.grid[r][c]===0) centers.push([r,c]);
+  if(centers.length===0){ metricsEl.textContent='Brak komórek.'; return; }
   const degs = [];
-  const adj = {};
   for(const [r,c] of centers){
-    const id = `${r},${c}`;
     let deg = 0;
     for(const d of [[-1,0],[1,0],[0,-1],[0,1]]){
       const nr=r+d[0], nc=c+d[1];
-      if(nr>=0 && nr<H && nc>=0 && nc<W && maze.grid[nr][nc]===0){
-        deg++;
-      }
+      if(nr>=0 && nr<H && nc>=0 && nc<W && maze.grid[nr][nc]===0) deg++;
     }
     degs.push(deg);
   }
@@ -575,7 +573,7 @@ function computeMetrics(){
   metricsEl.textContent = `Komórek: ${centers.length}  Dead-ends: ${dead}  Śr. stopień: ${avgDeg.toFixed(2)}`;
 }
 
-// on load: initial generate
+/* ====== Start on load ====== */
 window.addEventListener('load', ()=>{ startGeneration(); });
 
 </script>
