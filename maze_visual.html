@@ -191,6 +191,11 @@
       background: #059669;
     }
 
+    .btn-icon {
+      padding: 8px;
+      flex: 0 0 36px;
+    }
+
     /* Canvas Area */
     .canvas-wrapper {
       flex: 1;
@@ -198,18 +203,16 @@
       background: rgba(0, 0, 0, 0.2);
       border-radius: var(--radius-lg);
       border: 1px solid var(--glass-border);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
+      display: grid;
+      place-items: center;
+      overflow: auto;
       box-shadow: inset 0 0 100px rgba(0, 0, 0, 0.5);
     }
 
     canvas {
       border-radius: 4px;
       box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-      max-width: 95%;
-      max-height: 95%;
+      /* No max-width/height to allow zoom */
     }
 
     /* Status Bar */
@@ -229,7 +232,8 @@
 
     /* Scrollbar */
     ::-webkit-scrollbar {
-      width: 6px;
+      width: 8px;
+      height: 8px;
     }
 
     ::-webkit-scrollbar-track {
@@ -238,11 +242,15 @@
 
     ::-webkit-scrollbar-thumb {
       background: rgba(255, 255, 255, 0.1);
-      border-radius: 3px;
+      border-radius: 4px;
     }
 
     ::-webkit-scrollbar-thumb:hover {
       background: rgba(255, 255, 255, 0.2);
+    }
+
+    .canvas-wrapper::-webkit-scrollbar-corner {
+      background: transparent;
     }
 
     /* Mobile responsiveness */
@@ -267,17 +275,17 @@
     <aside class="panel">
       <div class="panel-header">
         <h1>Amazing Maze</h1>
-        <div class="subtitle">Algorithmic Visualizer v2.0</div>
+        <div class="subtitle">Algorithmic Visualizer v2.1</div>
       </div>
 
       <div class="control-group">
         <label>Grid Size (Cell Width)</label>
-        <input id="cellsInput" type="number" value="20" min="4" max="160" />
+        <input id="cellsInput" type="number" value="20" min="4" max="400" />
       </div>
 
       <div class="control-group">
         <label>Height (Rows)</label>
-        <input id="rowsInput" type="number" value="40" min="6" max="200" />
+        <input id="rowsInput" type="number" value="40" min="6" max="400" />
       </div>
 
       <div class="control-group">
@@ -307,6 +315,15 @@
         <input id="speed" type="number" value="2" min="0.1" max="20" step="0.5" />
       </div>
 
+      <div class="control-group">
+        <label>Zoom Level: <span id="zoomVal">100%</span></label>
+        <div class="btn-row">
+          <button id="zoomOutBtn" class="btn-secondary btn-icon">-</button>
+          <button id="zoomResetBtn" class="btn-secondary">Reset</button>
+          <button id="zoomInBtn" class="btn-secondary btn-icon">+</button>
+        </div>
+      </div>
+
       <div class="btn-row">
         <button id="genBtn" class="btn-primary">Generate</button>
         <button id="pauseBtn" class="btn-secondary">Pause</button>
@@ -326,7 +343,7 @@
         <div>Status: <span id="stats" class="status-highlight">Ready</span></div>
         <div id="metrics"></div>
         <div style="margin-top:8px; font-size:11px; opacity:0.6">
-          Left Click: Start • Right Click: Goal
+          Left Click: Start • Right Click: Goal • Scroll: Zoom
         </div>
       </div>
     </aside>
@@ -408,12 +425,18 @@
     const addLoopsBtn = document.getElementById('addLoopsBtn');
     const exportBtn = document.getElementById('exportBtn');
 
+    const zoomOutBtn = document.getElementById('zoomOutBtn');
+    const zoomInBtn = document.getElementById('zoomInBtn');
+    const zoomResetBtn = document.getElementById('zoomResetBtn');
+    const zoomValEl = document.getElementById('zoomVal');
+
     const statsEl = document.getElementById('stats');
     const metricsEl = document.getElementById('metrics');
 
     let maze = null;
     let paused = false;
-    let cellSize = 20;
+    let baseCellSize = 20;
+    let zoomLevel = 1.0;
     let startGrid = null;
     let goalGrid = null;
     let abortController = null;
@@ -448,6 +471,7 @@
         const [gar, gac] = this.cellToGrid(ar, ac), [gbr, gbc] = this.cellToGrid(br, bc);
         const wr = (gar + gbr) >> 1, wc = (gac + gbc) >> 1;
         this.set(wr, wc, 0);
+        return [wr, wc]; // Return wall coordinates for highlighting
       }
     }
 
@@ -456,16 +480,10 @@
       if (!m) return;
       const H = m.grid_h, W = m.grid_w;
 
-      const availW = container.clientWidth;
-      const availH = container.clientHeight;
-      const pad = 20;
+      const currentCellSize = Math.max(2, Math.floor(baseCellSize * zoomLevel));
 
-      const maxCellW = Math.floor((availW - pad * 2) / W);
-      const maxCellH = Math.floor((availH - pad * 2) / H);
-      cellSize = Math.max(2, Math.min(Number(cellsInput.value), maxCellW, maxCellH));
-
-      const drawW = W * cellSize;
-      const drawH = H * cellSize;
+      const drawW = W * currentCellSize;
+      const drawH = H * currentCellSize;
 
       if (canvas.width !== drawW || canvas.height !== drawH) {
         canvas.width = drawW;
@@ -488,7 +506,7 @@
       for (let r = 0; r < H; r++) {
         for (let c = 0; c < W; c++) {
           if (m.get(r, c) === 0) {
-            ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+            ctx.fillRect(c * currentCellSize, r * currentCellSize, currentCellSize, currentCellSize);
           }
         }
       }
@@ -497,28 +515,28 @@
         ctx.fillStyle = COLOR_HIGHLIGHT;
         for (const k of highlightSet) {
           const [r, c] = k.split(',').map(Number);
-          ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+          ctx.fillRect(c * currentCellSize, r * currentCellSize, currentCellSize, currentCellSize);
         }
       }
 
       if (path) {
         ctx.fillStyle = COLOR_PATH;
-        const inset = cellSize * 0.25;
-        const size = cellSize - inset * 2;
+        const inset = currentCellSize * 0.25;
+        const size = currentCellSize - inset * 2;
         for (const [r, c] of path) {
-          ctx.fillRect(c * cellSize + inset, r * cellSize + inset, size, size);
+          ctx.fillRect(c * currentCellSize + inset, r * currentCellSize + inset, size, size);
         }
       }
 
       if (startGrid) {
         const [sr, sc] = startGrid;
         ctx.fillStyle = COLOR_START;
-        ctx.fillRect(sc * cellSize, sr * cellSize, cellSize, cellSize);
+        ctx.fillRect(sc * currentCellSize, sr * currentCellSize, currentCellSize, currentCellSize);
       }
       if (goalGrid) {
         const [gr, gc] = goalGrid;
         ctx.fillStyle = COLOR_GOAL;
-        ctx.fillRect(gc * cellSize, gr * cellSize, cellSize, cellSize);
+        ctx.fillRect(gc * currentCellSize, gr * currentCellSize, currentCellSize, currentCellSize);
       }
     }
 
@@ -544,6 +562,7 @@
       if (!m || m.cells.length === 0) return;
 
       const keyOf = (cell) => `${cell[0]},${cell[1]}`;
+      const gridKey = (r, c) => `${r},${c}`;
 
       let unvisitedList = [...m.cells];
       shuffle(unvisitedList);
@@ -578,13 +597,21 @@
 
           if (nbrsVisited.length > 0) {
             const chosen = nbrsVisited[Math.floor(rng() * nbrsVisited.length)];
-            m.removeWallBetween(chosen, next);
+            const [wr, wc] = m.removeWallBetween(chosen, next);
             visited.add(keyOf(next));
             stack.push(next);
-            highlights.add(keyOf(next));
+
+            // Fix: Use grid coordinates for highlights
+            const [cr, cc] = m.cellToGrid(chosen[0], chosen[1]);
+            const [nr, nc] = m.cellToGrid(next[0], next[1]);
+            highlights.add(gridKey(cr, cc));
+            highlights.add(gridKey(nr, nc));
+            highlights.add(gridKey(wr, wc));
           } else {
             visited.add(keyOf(next));
             stack.push(next);
+            const [nr, nc] = m.cellToGrid(next[0], next[1]);
+            highlights.add(gridKey(nr, nc));
           }
 
           drawMaze(m, highlights);
@@ -612,11 +639,16 @@
 
         if (neighbors.length > 0) {
           const nb = neighbors[Math.floor(rng() * neighbors.length)];
-          m.removeWallBetween([r, c], nb);
+          const [wr, wc] = m.removeWallBetween([r, c], nb);
           visited.add(keyOf(nb));
           stack.push(nb);
-          highlights.add(keyOf(nb));
-          highlights.add(keyOf([r, c]));
+
+          // Fix: Use grid coordinates for highlights
+          const [cr, cc] = m.cellToGrid(r, c);
+          const [nr, nc] = m.cellToGrid(nb[0], nb[1]);
+          highlights.add(gridKey(cr, cc));
+          highlights.add(gridKey(nr, nc));
+          highlights.add(gridKey(wr, wc));
         } else {
           stack.splice(idx, 1);
         }
@@ -659,6 +691,7 @@
       }
 
       const highlights = new Set();
+      const gridKey = (r, c) => `${r},${c}`;
       let batchSize = Math.max(1, Math.floor(edges.length / 200));
 
       for (let i = 0; i < edges.length; i++) {
@@ -670,9 +703,13 @@
         const idxB = cellIndex(b[0], b[1]);
 
         if (union(idxA, idxB)) {
-          m.removeWallBetween(a, b);
-          highlights.add(`${a[0]},${a[1]}`);
-          highlights.add(`${b[0]},${b[1]}`);
+          const [wr, wc] = m.removeWallBetween(a, b);
+          // Fix: Use grid coordinates for highlights
+          const [ar, ac] = m.cellToGrid(a[0], a[1]);
+          const [br, bc] = m.cellToGrid(b[0], b[1]);
+          highlights.add(gridKey(ar, ac));
+          highlights.add(gridKey(br, bc));
+          highlights.add(gridKey(wr, wc));
         }
 
         if (i % batchSize === 0) {
@@ -887,20 +924,36 @@
     addLoopsBtn.addEventListener('click', () => { if (maze) { addLoops(maze); drawMaze(maze); } });
     exportBtn.addEventListener('click', () => { if (maze) exportSVG(maze); });
 
+    // Zoom controls
+    function updateZoom(newZoom) {
+      zoomLevel = Math.max(0.1, Math.min(5.0, newZoom));
+      zoomValEl.textContent = Math.round(zoomLevel * 100) + '%';
+      if (maze) drawMaze(maze);
+    }
+    zoomInBtn.addEventListener('click', () => updateZoom(zoomLevel + 0.2));
+    zoomOutBtn.addEventListener('click', () => updateZoom(zoomLevel - 0.2));
+    zoomResetBtn.addEventListener('click', () => updateZoom(1.0));
+
+    container.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        updateZoom(zoomLevel + delta);
+      }
+    });
+
     canvas.addEventListener('mousedown', (ev) => {
       if (!maze) return;
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
+      const currentCellSize = Math.max(2, Math.floor(baseCellSize * zoomLevel));
 
-      const x = (ev.clientX - rect.left) * scaleX;
-      const y = (ev.clientY - rect.top) * scaleY;
+      const x = ev.clientX - rect.left;
+      const y = ev.clientY - rect.top;
 
-      const gc = Math.floor(x / cellSize);
-      const gr = Math.floor(y / cellSize);
+      const gc = Math.floor(x / currentCellSize);
+      const gr = Math.floor(y / currentCellSize);
 
       if (gr >= 0 && gr < maze.grid_h && gc >= 0 && gc < maze.grid_w && maze.get(gr, gc) === 0) {
-        // Right click (2) or Ctrl+Click for Goal
         if (ev.button === 2 || ev.ctrlKey) {
           goalGrid = [gr, gc];
         } else {
@@ -929,6 +982,18 @@
 
       maze = new Maze(w, h, mask);
       startGrid = null; goalGrid = null;
+
+      // Set baseCellSize based on fit, but allow zoom
+      const availW = container.clientWidth;
+      const availH = container.clientHeight;
+      const pad = 20;
+      const maxCellW = Math.floor((availW - pad * 2) / maze.grid_w);
+      const maxCellH = Math.floor((availH - pad * 2) / maze.grid_h);
+      // Default to fit, but not smaller than 4 if possible, unless grid is huge
+      baseCellSize = Math.max(4, Math.min(20, maxCellW, maxCellH));
+
+      // Reset zoom on new generation
+      updateZoom(1.0);
       drawMaze(maze);
 
       const speedFactor = Number(speedInput.value) || 1;
