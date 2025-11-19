@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
 <meta charset="utf-8" />
-<title>Interaktywny labirynt — generator + solver (animacja) — poprawiony</title>
+<title>Interaktywny labirynt — generator + solver (animacja) — v2.0</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
   :root{
@@ -12,28 +12,30 @@
     --accent:#16a34a;
     --accent2:#2563eb;
   }
-  html,body{height:100%;margin:0;background:var(--bg);color:#e6eef6;font-family:Inter,Segoe UI,Arial,sans-serif}
+  html,body{height:100%;margin:0;background:var(--bg);color:#e6eef6;font-family:Inter,Segoe UI,Arial,sans-serif;overflow:hidden}
   .wrap{display:flex;gap:12px;padding:12px;height:100%;box-sizing:border-box}
-  .panel{width:320px;background:linear-gradient(180deg,var(--panel),#0b1220);border-radius:10px;padding:12px;box-shadow:0 6px 30px rgba(0,0,0,0.6)}
-  .panel h2{margin:6px 0 10px 0;font-size:18px;color:white}
-  label{display:flex;justify-content:space-between;align-items:center;margin:8px 0;font-size:13px;color:var(--muted)}
+  .panel{width:320px;background:linear-gradient(180deg,var(--panel),#0b1220);border-radius:10px;padding:12px;box-shadow:0 6px 30px rgba(0,0,0,0.6);display:flex;flex-direction:column;gap:8px;overflow-y:auto}
+  .panel h2{margin:0 0 10px 0;font-size:18px;color:white}
+  label{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--muted)}
   input[type=number], select {width:130px;padding:6px;border-radius:6px;border:1px solid #1f2937;background:#06111a;color:#dbeafe}
-  button{display:inline-block;background:var(--accent);color:white;border:none;padding:8px 10px;border-radius:8px;margin:6px 4px;cursor:pointer}
+  button{display:inline-block;background:var(--accent);color:white;border:none;padding:8px 10px;border-radius:8px;cursor:pointer;font-weight:500;transition:opacity 0.2s}
+  button:hover{opacity:0.9}
   button.secondary{background:#374151}
-  .small{font-size:12px;color:var(--muted);margin-top:6px}
-  canvas{border-radius:10px;background:#071022;box-shadow: 0 10px 40px rgba(0,0,0,0.8)}
-  .footer{font-size:12px;color:var(--muted);margin-top:8px}
+  .small{font-size:12px;color:var(--muted);line-height:1.4}
+  canvas{border-radius:10px;background:#071022;box-shadow: 0 10px 40px rgba(0,0,0,0.8); touch-action: none;}
+  .footer{font-size:11px;color:var(--muted);margin-top:auto;padding-top:10px;border-top:1px solid #1f2937}
   .row{display:flex;gap:8px;align-items:center}
-  .toggle{display:flex;gap:6px;align-items:center}
+  .canvas-container{flex:1;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;position:relative;min-width:0;min-height:0}
+  #stats{font-weight:500;color:#e6eef6}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="panel">
-    <h2>Labirynt — generator & solver (poprawiony)</h2>
+    <h2>Labirynt v2.0</h2>
 
-    <label>Rozmiar (szer. komórki) <input id="cellsInput" type="number" value="40" min="6" max="160" /></label>
-    <label>Wysokość (komórki) <input id="rowsInput" type="number" value="28" min="6" max="120" /></label>
+    <label>Rozmiar (szer. komórki) <input id="cellsInput" type="number" value="20" min="4" max="160" /></label>
+    <label>Wysokość (komórki) <input id="rowsInput" type="number" value="40" min="6" max="200" /></label>
 
     <label>Kształt
       <select id="shapeSelect">
@@ -50,42 +52,97 @@
       </select>
     </label>
 
-    <label>Strategia Growing Tree (p dla last) <input id="mixP" type="number" value="0.9" min="0" max="1" step="0.05" /></label>
+    <label>Strategia Growing Tree <input id="mixP" type="number" value="0.9" min="0" max="1" step="0.05" title="Prawdopodobieństwo wyboru ostatniego elementu (DFS-like)"/></label>
 
-    <label>Prędkość animacji <input id="speed" type="number" value="1" min="0.1" max="10" step="0.1" /></label>
+    <label>Prędkość animacji <input id="speed" type="number" value="2" min="0.1" max="20" step="0.5" /></label>
 
     <div class="row">
-      <button id="genBtn">Generuj</button>
-      <button id="pauseBtn" class="secondary">Pauza</button>
+      <button id="genBtn" style="flex:1">Generuj</button>
+      <button id="pauseBtn" class="secondary" style="width:80px">Pauza</button>
     </div>
 
     <div class="row">
-      <button id="solveBtn">Rozwiąż (BFS)</button>
-      <button id="solveAstarBtn">Rozwiąż (A*)</button>
+      <button id="solveBtn" style="flex:1">BFS</button>
+      <button id="solveAstarBtn" style="flex:1">A*</button>
     </div>
 
     <div class="row">
-      <button id="addLoopsBtn" class="secondary">Dodaj pętle</button>
-      <button id="exportBtn" class="secondary">Eksportuj SVG</button>
+      <button id="addLoopsBtn" class="secondary" style="flex:1">Pętle</button>
+      <button id="exportBtn" class="secondary" style="flex:1">SVG</button>
     </div>
 
-    <div class="small">Kliknij canvas, aby ustawić start (pierwszy klik) i koniec (drugi klik). Domyślnie wejście = górna otwarta komórka, wyjście = dolna.</div>
-    <div class="footer">Poprawka: algorytm DFS teraz łączy wszystkie dozwolone komórki (obsługa masek).</div>
+    <div class="small">
+      Kliknij canvas: Start (LPM), Cel (PPM/2.klik).<br/>
+      Algorytmy zoptymalizowane (PriorityQueue).
+    </div>
+    <div class="footer">
+      Status: <span id="stats">gotowy</span><br/>
+      <span id="metrics"></span>
+    </div>
   </div>
 
-  <div style="flex:1;display:flex;flex-direction:column;gap:12px;align-items:center">
-    <canvas id="canvas" width="1200" height="800"></canvas>
-    <div style="display:flex;gap:12px;color:var(--muted);font-size:13px">
-      <div id="stats">Status: gotowy</div>
-      <div id="metrics"></div>
-    </div>
+  <div class="canvas-container">
+    <canvas id="canvas"></canvas>
   </div>
 </div>
 
 <script>
+/**
+ * PriorityQueue implementation for A*
+ */
+class PriorityQueue {
+  constructor(comparator = (a, b) => a > b) {
+    this._heap = [];
+    this._comparator = comparator;
+  }
+  size() { return this._heap.length; }
+  isEmpty() { return this.size() === 0; }
+  peek() { return this._heap[0]; }
+  push(...values) {
+    values.forEach(value => {
+      this._heap.push(value);
+      this._siftUp();
+    });
+    return this.size();
+  }
+  pop() {
+    const poppedValue = this.peek();
+    const bottom = this.size() - 1;
+    if (bottom > 0) {
+      this._heap[0] = this._heap[bottom];
+    }
+    this._heap.pop();
+    this._siftDown();
+    return poppedValue;
+  }
+  _parent(i) { return ((i + 1) >>> 1) - 1; }
+  _left(i) { return (i << 1) + 1; }
+  _right(i) { return (i + 1) << 1; }
+  _greater(i, j) { return this._comparator(this._heap[i], this._heap[j]); }
+  _siftUp() {
+    let node = this.size() - 1;
+    while (node > 0 && this._greater(node, this._parent(node))) {
+      this._swap(node, this._parent(node));
+      node = this._parent(node);
+    }
+  }
+  _siftDown() {
+    let node = 0;
+    while (
+      (this._left(node) < this.size() && this._greater(this._left(node), node)) ||
+      (this._right(node) < this.size() && this._greater(this._right(node), node))
+    ) {
+      let maxChild = (this._right(node) < this.size() && this._greater(this._right(node), this._left(node))) ? this._right(node) : this._left(node);
+      this._swap(node, maxChild);
+      node = maxChild;
+    }
+  }
+  _swap(i, j) { [this._heap[i], this._heap[j]] = [this._heap[j], this._heap[i]]; }
+}
+
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d', {alpha:false});
-let cw = canvas.width, ch = canvas.height;
+const container = document.querySelector('.canvas-container');
 
 const cellsInput = document.getElementById('cellsInput');
 const rowsInput = document.getElementById('rowsInput');
@@ -106,9 +163,10 @@ const metricsEl = document.getElementById('metrics');
 
 let maze = null;
 let paused = false;
-let cellSize = 18;
+let cellSize = 20;
 let startGrid = null;
 let goalGrid = null;
+let abortController = null; // To cancel previous tasks
 
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 function rng(){ return Math.random(); }
@@ -117,77 +175,100 @@ class Maze {
   constructor(w,h,maskFunc=null){
     this.w = w; this.h = h;
     this.grid_h = 2*h + 1; this.grid_w = 2*w + 1;
-    this.grid = Array.from({length:this.grid_h}, ()=>Array(this.grid_w).fill(1));
+    // 1 = wall, 0 = passage
+    // Using Int8Array for memory efficiency on large grids
+    this.grid = new Int8Array(this.grid_h * this.grid_w).fill(1); 
     this.mask = maskFunc;
     this.cells = [];
     for(let r=0;r<h;r++){
       for(let c=0;c<w;c++){
         if(!this.mask || this.mask(r,c)){
           const gr = r*2+1, gc = c*2+1;
-          this.grid[gr][gc] = 0;
+          this.set(gr, gc, 0);
           this.cells.push([r,c]);
         }
       }
     }
   }
+  get(r, c) { return this.grid[r * this.grid_w + c]; }
+  set(r, c, val) { this.grid[r * this.grid_w + c] = val; }
+  
   inBoundsCell(r,c){ return r>=0 && r<this.h && c>=0 && c<this.w && (!this.mask || this.mask(r,c)); }
   cellToGrid(r,c){ return [r*2+1, c*2+1]; }
   removeWallBetween(a,b){
     const [ar,ac]=a, [br,bc]=b;
     const [gar,gac]=this.cellToGrid(ar,ac), [gbr,gbc]=this.cellToGrid(br,bc);
-    const wr = (gar+gbr)/2 | 0, wc = (gac+gbc)/2 | 0;
-    this.grid[wr][wc] = 0;
+    const wr = (gar+gbr)>>1, wc = (gac+gbc)>>1;
+    this.set(wr, wc, 0);
   }
 }
 
 // Drawing
 function drawMaze(m, highlightSet=null, path=null){
-  ctx.clearRect(0,0,cw,ch);
-  ctx.fillStyle = '#071022';
-  ctx.fillRect(0,0,cw,ch);
   if(!m) return;
   const H = m.grid_h, W = m.grid_w;
-  const pad = 6;
-  const maxCell = Math.floor(Math.min((cw - pad*2) / W, (ch - pad*2) / H));
-  const cs = Math.max(4, Math.min(cellSize, maxCell));
-  const ox = Math.floor((cw - W*cs)/2);
-  const oy = Math.floor((ch - H*cs)/2);
+  
+  // Auto-fit
+  const availW = container.clientWidth;
+  const availH = container.clientHeight;
+  const pad = 10;
+  
+  const maxCellW = Math.floor((availW - pad*2) / W);
+  const maxCellH = Math.floor((availH - pad*2) / H);
+  cellSize = Math.max(2, Math.min(Number(cellsInput.value), maxCellW, maxCellH));
+  
+  const drawW = W * cellSize;
+  const drawH = H * cellSize;
+  
+  if(canvas.width !== drawW || canvas.height !== drawH){
+    canvas.width = drawW;
+    canvas.height = drawH;
+  }
 
+  // Clear
+  ctx.fillStyle = '#071022';
+  ctx.fillRect(0,0,drawW,drawH);
+
+  // Draw walls/passages
+  // Optimization: Draw only passages (0) on top of background (1)
+  ctx.fillStyle = '#e6eef6';
   for(let r=0;r<H;r++){
     for(let c=0;c<W;c++){
-      const v = m.grid[r][c];
-      const x = ox + c*cs, y = oy + r*cs;
-      if(v===1){
-        ctx.fillStyle = '#02111a';
-        ctx.fillRect(x,y,cs,cs);
-      } else {
-        ctx.fillStyle = '#e6eef6';
-        ctx.fillRect(x,y,cs,cs);
+      if(m.get(r,c) === 0){
+        ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize);
       }
     }
   }
+
+  // Highlights (visited/processing)
   if(highlightSet){
+    ctx.fillStyle = 'rgba(37,99,235,0.3)';
     for(const k of highlightSet){
-      const [r,c]=k.split(',').map(Number);
-      ctx.fillStyle = 'rgba(37,99,235,0.14)';
-      ctx.fillRect(ox + c*cs, oy + r*cs, cs, cs);
+      const [r,c] = k.split(',').map(Number);
+      ctx.fillRect(c*cellSize, r*cellSize, cellSize, cellSize);
     }
   }
+
+  // Path
   if(path){
+    ctx.fillStyle = 'rgba(220, 38, 38, 0.9)';
+    const inset = cellSize * 0.2;
+    const size = cellSize - inset*2;
     for(const [r,c] of path){
-      ctx.fillStyle = 'rgba(255,0,0,0.9)';
-      ctx.fillRect(ox + c*cs + cs*0.15, oy + r*cs + cs*0.15, cs*0.7, cs*0.7);
+      ctx.fillRect(c*cellSize + inset, r*cellSize + inset, size, size);
     }
   }
+
+  // Start/Goal
   if(startGrid){
     const [sr,sc] = startGrid;
     ctx.fillStyle = '#16a34a';
-    ctx.fillRect(ox + sc*cs, oy + sr*cs, cs, cs);
+    ctx.fillRect(sc*cellSize, sr*cellSize, cellSize, cellSize);
   }
   if(goalGrid){
     const [gr,gc] = goalGrid;
     ctx.fillStyle = '#2563eb';
-    ctx.fillRect(ox + gc*cs, oy + gr*cs, cs, cs);
+    ctx.fillRect(gc*cellSize, gr*cellSize, cellSize, cellSize);
   }
 }
 
@@ -199,39 +280,54 @@ function shuffle(arr){
   }
 }
 
-// throttling
-function throttle(speedFactor){
-  const base = 8;
-  const mv = Math.max(0.05, speedFactor);
-  return sleep(base / mv);
+// Throttling
+async function throttle(speedFactor){
+  if(speedFactor > 10) return; // Instant for high speed
+  const base = 20;
+  const ms = base / speedFactor;
+  await sleep(ms);
 }
 
-/* ====== POPRAWIONA FUNKCJA GENERUJĄCA (DFS / Growing Tree) ======
-   Uwaga: obsługuje maski. Gwarantuje, że wszystkie dozwolone komórki
-   zostaną połączone (łączenie komponentów) — dzięki temu labirynt
-   będzie spójny / rozwiązywalny, o ile wejście/wyjście leżą w tym
-   spójnym obszarze.
-*/
+/* ====== GENERATORS ====== */
+
 async function generateDFS_fullcoverage(m, speedFactor=1, strategy='last'){
-  statsEl.textContent = 'Status: generowanie (DFS / Growing Tree)...';
+  statsEl.textContent = 'Generowanie (DFS)...';
   const visited = new Set();
   if(!m || m.cells.length===0) return;
 
-  // pomoc: zbiór wszystkich cell-key
   const keyOf = (cell)=> `${cell[0]},${cell[1]}`;
-
-  // start z losowej komórki
-  let startCell = m.cells[Math.floor(rng()*m.cells.length)];
+  
+  // Optimization: Shuffle cells initially to pick random unvisited efficiently
+  let unvisitedList = [...m.cells];
+  shuffle(unvisitedList);
+  
+  // Start
+  let startCell = unvisitedList.pop();
   const stack = [startCell];
   visited.add(keyOf(startCell));
   const highlights = new Set();
 
-  while((stack.length > 0 || visited.size < m.cells.length) && !paused){
+  // Helper to find unvisited quickly
+  // We will just pop from unvisitedList until we find one not in visited set
+  // (because we might visit them via traversal)
+  
+  while((stack.length > 0 || unvisitedList.length > 0) && !paused){
+    if(abortController && abortController.signal.aborted) return;
+
     if(stack.length === 0){
-      // są nieodwiedzone komórki — wybierz jedną losową i połącz z odwiedzonym sąsiadem (jeśli taki istnieje)
-      const unvisited = m.cells.filter(c => !visited.has(keyOf(c)));
-      const next = unvisited[Math.floor(rng()*unvisited.length)];
-      // znajdź odwiedzonych sąsiadów next
+      // Find next unvisited
+      let next = null;
+      while(unvisitedList.length > 0){
+        const candidate = unvisitedList.pop();
+        if(!visited.has(keyOf(candidate))){
+          next = candidate;
+          break;
+        }
+      }
+      
+      if(!next) break; // All visited
+
+      // Connect to visited neighbor
       const nbrsVisited = [];
       for(const d of [[-1,0],[1,0],[0,-1],[0,1]]){
         const nr = next[0]+d[0], nc = next[1]+d[1];
@@ -239,37 +335,35 @@ async function generateDFS_fullcoverage(m, speedFactor=1, strategy='last'){
           nbrsVisited.push([nr,nc]);
         }
       }
+      
       if(nbrsVisited.length > 0){
-        // połącz z losowym odwiedzonym sąsiadem, żeby zachować spójność
         const chosen = nbrsVisited[Math.floor(rng()*nbrsVisited.length)];
         m.removeWallBetween(chosen, next);
         visited.add(keyOf(next));
         stack.push(next);
-        highlights.add(keyOf(chosen));
         highlights.add(keyOf(next));
       } else {
-        // brak odwiedzonych sąsiadów (izolowany fragment maski) — po prostu zacznij nowy "drzewo"
+        // Isolated start
         visited.add(keyOf(next));
         stack.push(next);
-        highlights.add(keyOf(next));
       }
+      
       drawMaze(m, highlights);
-      await throttle(speedFactor * 0.8);
+      await throttle(speedFactor);
       continue;
     }
 
-    // wybór komórki ze stosu wg strategii
+    // Strategy selection
     let idx;
     if(typeof strategy === 'number'){
       idx = (rng() < strategy) ? stack.length-1 : Math.floor(rng()*stack.length);
     } else if(strategy === 'last') idx = stack.length-1;
     else if(strategy === 'random') idx = Math.floor(rng()*stack.length);
-    else if(strategy === 'first') idx = 0;
     else idx = stack.length-1;
 
     const cell = stack[idx];
     const [r,c] = cell;
-    // znajdź nieodwiedzonych sąsiadów
+    
     const neighbors = [];
     for(const d of [[-1,0],[1,0],[0,-1],[0,1]]){
       const nr = r + d[0], nc = c + d[1];
@@ -277,6 +371,7 @@ async function generateDFS_fullcoverage(m, speedFactor=1, strategy='last'){
         neighbors.push([nr,nc]);
       }
     }
+
     if(neighbors.length > 0){
       const nb = neighbors[Math.floor(rng()*neighbors.length)];
       m.removeWallBetween([r,c], nb);
@@ -285,175 +380,235 @@ async function generateDFS_fullcoverage(m, speedFactor=1, strategy='last'){
       highlights.add(keyOf(nb));
       highlights.add(keyOf([r,c]));
     } else {
+      // Optimization: swap remove for O(1) if order doesn't matter, but here order matters for stack
+      // For random strategy it doesn't, but let's keep splice for simplicity as stack isn't huge
       stack.splice(idx,1);
     }
-    // rysuj fragmenty podczas pracy
-    if(Math.random() < 0.08) drawMaze(m, highlights);
-    await throttle(speedFactor);
+    
+    if(Math.random() < 0.1) {
+        drawMaze(m, highlights);
+        await throttle(speedFactor);
+    }
   }
 
   drawMaze(m);
-  statsEl.textContent = 'Status: wygenerowano (DFS pełne pokrycie)';
+  statsEl.textContent = 'Wygenerowano (DFS)';
 }
 
-/* ====== KRUSKAL ====== (jest OK; zostawiam prawie bez zmian) */
 async function generateKruskal(m, speedFactor=1){
-  statsEl.textContent = 'Status: generowanie (Kruskal)...';
+  statsEl.textContent = 'Generowanie (Kruskal)...';
   const edges = [];
   for(const [r,c] of m.cells){
+    // Right and Down
     [[0,1],[1,0]].forEach(d=>{
       const nr=r+d[0], nc=c+d[1];
       if(m.inBoundsCell(nr,nc)) edges.push([[r,c],[nr,nc]]);
     });
   }
   shuffle(edges);
-  const parent = new Map();
-  for(const cell of m.cells) parent.set(cell.join(','), cell.join(','));
-  function find(u){
-    let p = parent.get(u);
-    if(p !== u){
-      p = find(p);
-      parent.set(u,p);
-    }
-    return p;
+  
+  const parent = new Int32Array(m.h * m.w).fill(-1); // -1 means self-parent
+  const cellIndex = (r,c) => r*m.w + c;
+  
+  function find(i){
+    if(parent[i] < 0) return i;
+    parent[i] = find(parent[i]);
+    return parent[i];
   }
-  function union(a,b){
-    const ra = find(a), rb = find(b);
-    if(ra === rb) return false;
-    parent.set(rb, ra);
+  function union(i, j){
+    const rootI = find(i);
+    const rootJ = find(j);
+    if(rootI === rootJ) return false;
+    parent[rootJ] = rootI;
     return true;
   }
+
   const highlights = new Set();
-  for(const [a,b] of edges){
-    if(paused) { await throttle(speedFactor*0.5); continue; }
-    const ak = a.join(','), bk = b.join(',');
-    if(union(ak, bk)){
+  
+  // Batch processing for speed
+  let batchSize = Math.max(1, Math.floor(edges.length / 200));
+  
+  for(let i=0; i<edges.length; i++){
+    if(abortController && abortController.signal.aborted) return;
+    if(paused) { await sleep(100); i--; continue; }
+
+    const [a,b] = edges[i];
+    const idxA = cellIndex(a[0], a[1]);
+    const idxB = cellIndex(b[0], b[1]);
+    
+    if(union(idxA, idxB)){
       m.removeWallBetween(a,b);
-      highlights.add(ak); highlights.add(bk);
+      highlights.add(`${a[0]},${a[1]}`);
+      highlights.add(`${b[0]},${b[1]}`);
     }
-    if(Math.random() < 0.03) drawMaze(m, highlights);
-    await throttle(speedFactor * 0.4);
+    
+    if(i % batchSize === 0){
+        drawMaze(m, highlights);
+        highlights.clear();
+        await throttle(speedFactor);
+    }
   }
   drawMaze(m);
-  statsEl.textContent = 'Status: wygenerowano (Kruskal)';
+  statsEl.textContent = 'Wygenerowano (Kruskal)';
 }
 
-/* ====== SOLVERY (BFS + A*) - bez zmian logicznych, ale dodane komunikaty) ====== */
+/* ====== SOLVERS ====== */
+
 async function bfsSolve(m, speedFactor=1){
-  if(!m){ statsEl.textContent='Brak labiryntu'; return; }
-  if(!startGrid || !goalGrid){ statsEl.textContent='Ustaw start i cel (kliknij canvas)'; return; }
-  statsEl.textContent = 'Status: rozwiązywanie (BFS)...';
+  if(!m || !startGrid || !goalGrid) return;
+  statsEl.textContent = 'Rozwiązywanie (BFS)...';
+  
   const H=m.grid_h, W=m.grid_w;
   const start = startGrid, goal = goalGrid;
-  const q=[]; q.push(start);
-  const parent = new Map();
-  parent.set(start.join(','), null);
-  const visited = new Set();
-  visited.add(start.join(','));
+  
+  // Use a simple array as queue with pointer for O(1) dequeue
+  const q = [start];
+  let head = 0;
+  
+  const parent = new Int32Array(H * W).fill(-1); // Store flattened index of parent
+  const visited = new Int8Array(H * W).fill(0);
+  
+  const flatIdx = (r,c) => r*W + c;
+  const unFlatIdx = (idx) => [Math.floor(idx/W), idx%W];
+  
+  const startFlat = flatIdx(start[0], start[1]);
+  visited[startFlat] = 1;
+  
   const highlights = new Set();
+  let found = false;
 
-  while(q.length && !paused){
-    const cur = q.shift();
-    if(cur[0]===goal[0] && cur[1]===goal[1]) break;
+  while(head < q.length && !paused){
+    if(abortController && abortController.signal.aborted) return;
+
+    const cur = q[head++];
+    const [r,c] = cur;
+    
+    if(r===goal[0] && c===goal[1]){ found=true; break; }
+    
+    const curFlat = flatIdx(r,c);
+    
     for(const d of [[-1,0],[1,0],[0,-1],[0,1]]){
-      const nr = cur[0]+d[0], nc = cur[1]+d[1];
-      if(nr>=0 && nr<H && nc>=0 && nc<W && m.grid[nr][nc]===0){
-        const key = `${nr},${nc}`;
-        if(!parent.has(key)){
-          parent.set(key, cur.join(','));
+      const nr = r+d[0], nc = c+d[1];
+      if(nr>=0 && nr<H && nc>=0 && nc<W && m.get(nr,nc)===0){
+        const nFlat = flatIdx(nr,nc);
+        if(visited[nFlat]===0){
+          visited[nFlat] = 1;
+          parent[nFlat] = curFlat;
           q.push([nr,nc]);
-          highlights.add(key);
+          highlights.add(`${nr},${nc}`);
         }
       }
     }
-    if(Math.random() < 0.04) drawMaze(m, highlights);
-    await throttle(speedFactor*0.7);
+    
+    if(head % 50 === 0){
+       drawMaze(m, highlights);
+       await throttle(speedFactor);
+    }
   }
 
-  const goalKey = goal.join(',');
-  if(!parent.has(goalKey)){ statsEl.textContent='Brak ścieżki (niepołączone komponenty?)'; return; }
-  const path=[];
-  let key = goalKey;
-  while(key){
-    const [rr,cc] = key.split(',').map(Number);
+  if(!found){ statsEl.textContent='Brak ścieżki'; return; }
+
+  // Reconstruct
+  const path = [];
+  let curr = flatIdx(goal[0], goal[1]);
+  while(curr !== -1 && curr !== startFlat){
+    path.push(unFlatIdx(curr));
+    curr = parent[curr];
+  }
+  path.push(start);
+  path.reverse();
+  
+  statsEl.textContent = `Odnaleziono trasę (BFS): ${path.length} kroków`;
+  drawMaze(m, null, path);
+}
+
+function heuristic(r, c, gr, gc){ return Math.abs(r-gr) + Math.abs(c-gc); }
+
+async function aStarSolve(m, speedFactor=1){
+  if(!m || !startGrid || !goalGrid) return;
+  statsEl.textContent = 'Rozwiązywanie (A*)...';
+  
+  const H=m.grid_h, W=m.grid_w;
+  const [sr, sc] = startGrid;
+  const [gr, gc] = goalGrid;
+  
+  // Priority Queue storing [f_score, r, c]
+  // Min-heap based on f_score
+  const pq = new PriorityQueue((a, b) => a[0] < b[0]);
+  pq.push([0, sr, sc]);
+  
+  const flatIdx = (r,c) => r*W + c;
+  const gScore = new Float32Array(H * W).fill(Infinity);
+  const parent = new Int32Array(H * W).fill(-1);
+  
+  const startFlat = flatIdx(sr,sc);
+  gScore[startFlat] = 0;
+  
+  const highlights = new Set();
+  let found = false;
+
+  while(!pq.isEmpty() && !paused){
+    if(abortController && abortController.signal.aborted) return;
+
+    const [f, r, c] = pq.pop();
+    
+    if(r === gr && c === gc){ found = true; break; }
+    
+    const currentFlat = flatIdx(r,c);
+    const currentG = gScore[currentFlat];
+    
+    // Optimization: Lazy deletion handling
+    // If we found a better path to this node already, skip
+    // (Not strictly necessary if we don't add duplicates, but good practice)
+    
+    for(const d of [[-1,0],[1,0],[0,-1],[0,1]]){
+      const nr = r+d[0], nc = c+d[1];
+      if(nr>=0 && nr<H && nc>=0 && nc<W && m.get(nr,nc)===0){
+        const tentativeG = currentG + 1;
+        const nFlat = flatIdx(nr,nc);
+        
+        if(tentativeG < gScore[nFlat]){
+          parent[nFlat] = currentFlat;
+          gScore[nFlat] = tentativeG;
+          const h = heuristic(nr, nc, gr, gc);
+          pq.push([tentativeG + h, nr, nc]);
+          highlights.add(`${nr},${nc}`);
+        }
+      }
+    }
+    
+    if(Math.random() < 0.05){
+        drawMaze(m, highlights);
+        await throttle(speedFactor);
+    }
+  }
+
+  if(!found){ statsEl.textContent='Brak ścieżki (A*)'; return; }
+
+  const path = [];
+  let curr = flatIdx(gr, gc);
+  while(curr !== -1){
+    const [rr,cc] = [Math.floor(curr/W), curr%W];
     path.push([rr,cc]);
-    key = parent.get(key);
+    if(rr===sr && cc===sc) break;
+    curr = parent[curr];
   }
   path.reverse();
-  statsEl.textContent = 'Status: odnaleziono trasę (BFS)';
-  for(let i=0;i<path.length && !paused;i++){
-    drawMaze(m, null, path.slice(0,i+1));
-    await throttle(speedFactor*2);
-  }
+  
+  statsEl.textContent = `Odnaleziono trasę (A*): ${path.length} kroków`;
   drawMaze(m, null, path);
 }
 
-function heuristic(a,b){ return Math.abs(a[0]-b[0]) + Math.abs(a[1]-b[1]); }
-async function aStarSolve(m, speedFactor=1){
-  if(!m){ statsEl.textContent='Brak labiryntu'; return; }
-  if(!startGrid || !goalGrid){ statsEl.textContent='Ustaw start i cel (kliknij canvas)'; return; }
-  statsEl.textContent = 'Status: rozwiązywanie (A*)...';
-  const H=m.grid_h, W=m.grid_w;
-  const start = startGrid, goal = goalGrid;
-  const keyStart = start.join(','), keyGoal = goal.join(',');
-  const open = new Set(); open.add(keyStart);
-  const g = new Map(); const f = new Map(); const parent = new Map();
-  g.set(keyStart, 0); f.set(keyStart, heuristic(start,goal));
-
-  const visited = new Set();
-  while(open.size && !paused){
-    // wybierz najlepsze f
-    let curKey = null, best = Infinity;
-    for(const k of open){
-      const fv = f.get(k) ?? Infinity;
-      if(fv < best){ best = fv; curKey = k; }
-    }
-    if(curKey === keyGoal) break;
-    open.delete(curKey);
-    visited.add(curKey);
-    const [r,c] = curKey.split(',').map(Number);
-    for(const d of [[-1,0],[1,0],[0,-1],[0,1]]){
-      const nr=r+d[0], nc=c+d[1];
-      if(nr>=0 && nr<H && nc>=0 && nc<W && m.grid[nr][nc]===0){
-        const k2 = `${nr},${nc}`;
-        const tentative = (g.get(curKey)||Infinity) + 1;
-        if(tentative < (g.get(k2)||Infinity)){
-          parent.set(k2, curKey);
-          g.set(k2, tentative);
-          f.set(k2, tentative + heuristic([nr,nc], goal));
-          open.add(k2);
-        }
-      }
-    }
-    if(Math.random() < 0.04) drawMaze(m, visited);
-    await throttle(speedFactor*0.9);
-  }
-
-  if(!parent.has(keyGoal) && keyStart !== keyGoal){ statsEl.textContent='Brak ścieżki (A*)'; return; }
-  // odtwórz ścieżkę (jeśli start==goal, to zwróci jedynie ten punkt)
-  const path=[]; let k = keyGoal;
-  while(k){
-    path.unshift(k.split(',').map(Number));
-    k = parent.get(k);
-  }
-  statsEl.textContent = 'Status: odnaleziono trasę (A*)';
-  for(let i=0;i<path.length && !paused;i++){
-    drawMaze(m, null, path.slice(0,i+1));
-    await throttle(speedFactor*2);
-  }
-  drawMaze(m, null, path);
-}
-
-/* ====== Dodawanie pętli i eksport SVG (jak wcześniej) ====== */
-function addLoops(m, percent=0.02){
+/* ====== UTILS ====== */
+function addLoops(m, percent=0.05){
   const H=m.grid_h, W=m.grid_w;
   let removed=0;
   for(let r=1;r<H-1;r++){
     for(let c=1;c<W-1;c++){
-      if(m.grid[r][c]===1 && Math.random() < percent){
-        const neighPass = (m.grid[r-1][c]===0) + (m.grid[r+1][c]===0) + (m.grid[r][c-1]===0) + (m.grid[r][c+1]===0);
-        if(neighPass>=2 && neighPass<=3){
-          m.grid[r][c]=0; removed++;
+      if(m.get(r,c)===1 && Math.random() < percent){
+        const neighPass = (m.get(r-1,c)===0) + (m.get(r+1,c)===0) + (m.get(r,c-1)===0) + (m.get(r,c+1)===0);
+        if(neighPass>=2){
+          m.set(r,c,0); removed++;
         }
       }
     }
@@ -464,13 +619,13 @@ function addLoops(m, percent=0.02){
 function exportSVG(m){
   if(!m) return;
   const H=m.grid_h, W=m.grid_w;
-  const cs = 6;
+  const cs = 10;
   const width = W*cs, height = H*cs;
   let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`;
   svg += `<rect width="100%" height="100%" fill="#071022"/>`;
   for(let r=0;r<H;r++){
     for(let c=0;c<W;c++){
-      if(m.grid[r][c]===1){
+      if(m.get(r,c)===1){
         svg += `<rect x="${c*cs}" y="${r*cs}" width="${cs}" height="${cs}" fill="#02111a"/>`;
       }
     }
@@ -483,33 +638,57 @@ function exportSVG(m){
   URL.revokeObjectURL(url);
 }
 
-/* ====== Interakcje canvas ====== */
-canvas.addEventListener('click', (ev)=>{
+/* ====== CONTROLS ====== */
+
+async function runTask(taskFn){
+  if(abortController) abortController.abort();
+  abortController = new AbortController();
+  paused = false;
+  pauseBtn.textContent = 'Pauza';
+  try{
+    await taskFn();
+  } catch(e){
+    console.log("Task aborted or error", e);
+  }
+}
+
+genBtn.addEventListener('click', ()=> runTask(startGeneration));
+pauseBtn.addEventListener('click', ()=>{ 
+  paused = !paused; 
+  pauseBtn.textContent = paused ? 'Wznów' : 'Pauza'; 
+});
+solveBtn.addEventListener('click', ()=> runTask(()=>bfsSolve(maze, Number(speedInput.value))));
+solveAstarBtn.addEventListener('click', ()=> runTask(()=>aStarSolve(maze, Number(speedInput.value))));
+addLoopsBtn.addEventListener('click', ()=>{ if(maze){ addLoops(maze); drawMaze(maze); }});
+exportBtn.addEventListener('click', ()=>{ if(maze) exportSVG(maze); });
+
+canvas.addEventListener('mousedown', (ev)=>{
   if(!maze) return;
   const rect = canvas.getBoundingClientRect();
-  const x = ev.clientX - rect.left, y = ev.clientY - rect.top;
-  const H=maze.grid_h, W=maze.grid_w;
-  const maxCell = Math.floor(Math.min((cw - 12) / W, (ch - 12) / H));
-  const cs = Math.max(4, Math.min(cellSize, maxCell));
-  const ox = Math.floor((cw - W*cs)/2);
-  const oy = Math.floor((ch - H*cs)/2);
-  const gc = Math.floor((x - ox)/cs), gr = Math.floor((y - oy)/cs);
-  if(gr>=0 && gr<H && gc>=0 && gc<W && maze.grid[gr][gc]===0){
-    if(!startGrid || (startGrid && goalGrid)) { startGrid=[gr,gc]; goalGrid=null; }
-    else if(startGrid && !goalGrid) goalGrid = [gr,gc];
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  
+  const x = (ev.clientX - rect.left) * scaleX;
+  const y = (ev.clientY - rect.top) * scaleY;
+  
+  const gc = Math.floor(x / cellSize);
+  const gr = Math.floor(y / cellSize);
+  
+  if(gr>=0 && gr<maze.grid_h && gc>=0 && gc<maze.grid_w && maze.get(gr,gc)===0){
+    // Simple logic: Left click = start, Right click (or 2nd click) = goal
+    // But here we just toggle: if start set, set goal, else set start
+    if(!startGrid) startGrid = [gr,gc];
+    else if(!goalGrid) goalGrid = [gr,gc];
+    else { startGrid = [gr,gc]; goalGrid = null; }
+    
     drawMaze(maze);
   }
 });
 
-/* ====== Kontrolki ====== */
-genBtn.addEventListener('click', async ()=>{ paused=false; await startGeneration(); });
-pauseBtn.addEventListener('click', ()=>{ paused = !paused; pauseBtn.textContent = paused ? 'Wznów' : 'Pauza'; statsEl.textContent = paused ? 'Status: pauza' : 'Status: działanie'; });
-solveBtn.addEventListener('click', async ()=>{ paused=false; if(maze) await bfsSolve(maze, Number(speedInput.value)); });
-solveAstarBtn.addEventListener('click', async ()=>{ paused=false; if(maze) await aStarSolve(maze, Number(speedInput.value)); });
-addLoopsBtn.addEventListener('click', ()=>{ if(maze){ addLoops(maze, 0.02); drawMaze(maze); computeMetrics(); }});
-exportBtn.addEventListener('click', ()=>{ if(maze) exportSVG(maze); });
+window.addEventListener('resize', ()=>{
+    if(maze) drawMaze(maze);
+});
 
-/* ====== Orkiestrator generacji ====== */
 async function startGeneration(){
   const w = Number(cellsInput.value)|0;
   const h = Number(rowsInput.value)|0;
@@ -521,60 +700,43 @@ async function startGeneration(){
       return (dx*dx + dy*dy) <= (rad*rad);
     };
   }
+  
   maze = new Maze(w,h,mask);
-  cw = Math.min(window.innerWidth - 380, Math.max(600, w*18));
-  ch = Math.min(window.innerHeight - 60, Math.max(360, h*18));
-  canvas.width = cw; canvas.height = ch;
-
-  drawMaze(maze);
   startGrid = null; goalGrid = null;
+  drawMaze(maze);
 
   const speedFactor = Number(speedInput.value) || 1;
   const gen = genSelect.value;
-  paused = false;
+  
   if(gen === 'dfs' || gen === 'growing'){
     const strategy = (gen==='growing') ? Number(mixP.value) : 'last';
     await generateDFS_fullcoverage(maze, speedFactor, strategy);
   } else if(gen === 'kruskal'){
     await generateKruskal(maze, speedFactor);
   }
-
-  // ustawienie wejścia/wyjścia (górna i dolna otworzona komórka)
-  for(let c=1;c<maze.grid_w-1;c++){
-    if(maze.grid[1][c]===0){ startGrid=[0,c]; break; }
+  
+  // Auto set start/goal
+  // Find top-most left-most and bottom-most right-most
+  let s=null, g=null;
+  for(let r=1; r<maze.grid_h-1; r++){
+      for(let c=1; c<maze.grid_w-1; c++){
+          if(maze.get(r,c)===0){
+              if(!s) s = [r,c];
+              g = [r,c];
+          }
+      }
   }
-  for(let c=maze.grid_w-2;c>0;c--){
-    if(maze.grid[maze.grid_h-2][c]===0){ goalGrid=[maze.grid_h-1,c]; break; }
-  }
-  if(startGrid) maze.grid[startGrid[0]][startGrid[1]] = 0;
-  if(goalGrid) maze.grid[goalGrid[0]][goalGrid[1]] = 0;
+  startGrid = s;
+  goalGrid = g;
   drawMaze(maze);
-  computeMetrics();
+  
+  // Metrics
+  const total = maze.cells.length;
+  statsEl.textContent = `Gotowy. Komórek: ${total}`;
 }
 
-/* ====== Metryki ====== */
-function computeMetrics(){
-  if(!maze) return;
-  const H=maze.grid_h, W=maze.grid_w;
-  const centers = [];
-  for(let r=1;r<H;r+=2) for(let c=1;c<W;c+=2) if(maze.grid[r][c]===0) centers.push([r,c]);
-  if(centers.length===0){ metricsEl.textContent='Brak komórek.'; return; }
-  const degs = [];
-  for(const [r,c] of centers){
-    let deg = 0;
-    for(const d of [[-1,0],[1,0],[0,-1],[0,1]]){
-      const nr=r+d[0], nc=c+d[1];
-      if(nr>=0 && nr<H && nc>=0 && nc<W && maze.grid[nr][nc]===0) deg++;
-    }
-    degs.push(deg);
-  }
-  const dead = degs.filter(x=>x===1).length;
-  const avgDeg = degs.reduce((a,b)=>a+b,0)/degs.length;
-  metricsEl.textContent = `Komórek: ${centers.length}  Dead-ends: ${dead}  Śr. stopień: ${avgDeg.toFixed(2)}`;
-}
-
-/* ====== Start on load ====== */
-window.addEventListener('load', ()=>{ startGeneration(); });
+// Init
+window.addEventListener('load', ()=> runTask(startGeneration));
 
 </script>
 </body>
