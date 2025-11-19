@@ -387,7 +387,7 @@
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-    import { MeshLine, MeshLineMaterial } from 'three/addons/lines/MeshLine.js'; // Note: MeshLine might not be in standard addons, using Tube instead for reliability.
+    // MeshLine import removed as it caused loading errors. Using TubeGeometry instead.
 
     // --- CONFIG ---
     const WALL_HEIGHT = 1.2;
