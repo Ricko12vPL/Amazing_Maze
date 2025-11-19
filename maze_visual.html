@@ -345,7 +345,7 @@
         <div class="panel-header">
           <div>
             <h1>Amazing Maze</h1>
-            <div style="font-size:12px; color:var(--text-muted)">Ultra Edition v3.0</div>
+            <div style="font-size:12px; color:var(--text-muted)">Ultra Edition v3.1</div>
           </div>
           <span class="badge">3D</span>
         </div>
@@ -374,6 +374,7 @@
             <option value="prim">Prim's Algorithm (MST)</option>
             <option value="wilson">Wilson's (Loop-Erased)</option>
             <option value="growing">Growing Tree (Mix)</option>
+            <option value="caves">Caves (Cellular Automata)</option>
           </select>
         </div>
 
@@ -401,6 +402,10 @@
 
         <div class="btn-grid">
           <button id="solveBtn" class="btn-success">Solve</button>
+          <button id="heatmapBtn" class="btn-secondary">Heatmap</button>
+        </div>
+
+        <div class="btn-grid">
           <button id="clearBtn" class="btn-secondary">Clear Path</button>
         </div>
 
@@ -456,12 +461,10 @@
     // --- STATE ---
     let maze = null;
     let scene, camera, renderer, controls, fpsControls;
-    let gridMesh, wallInstancedMesh, floorMesh;
+    let wallInstancedMesh, floorInstancedMesh;
     let pathMeshGroup = new THREE.Group();
     let highlightMeshGroup = new THREE.Group();
-    let playerObj;
     let isGameMode = false;
-    let animationId;
     let abortController = null;
     let isGenerating = false;
 
@@ -485,17 +488,11 @@
     class Maze {
       constructor(w, h) {
         this.w = w; this.h = h;
-        this.grid = new Int8Array(w * h).fill(1); // 1 = Wall, 0 = Passage
-        // We use a "Cell" based approach where grid[y*w+x] represents a cell.
-        // Walls are implicit between cells.
-        // Actually, for 3D visualization, it's easier to use the "Grid" approach from before:
-        // 2*w+1 by 2*h+1.
+        this.grid = new Int8Array(w * h).fill(1);
         this.gw = 2 * w + 1;
         this.gh = 2 * h + 1;
         this.data = new Int8Array(this.gw * this.gh).fill(1);
 
-        // Initialize cells as unvisited (walls everywhere)
-        // We will carve out 0s.
         this.cells = [];
         for (let r = 0; r < h; r++) {
           for (let c = 0; c < w; c++) {
@@ -507,7 +504,6 @@
       get(r, c) { return this.data[r * this.gw + c]; }
       set(r, c, v) { this.data[r * this.gw + c] = v; }
 
-      // Convert abstract cell coord (0..w-1) to grid coord (1..gw-2)
       toGrid(r, c) { return [r * 2 + 1, c * 2 + 1]; }
 
       removeWall(c1, c2) {
@@ -516,9 +512,9 @@
         const [gr1, gc1] = this.toGrid(r1, c1x);
         const [gr2, gc2] = this.toGrid(r2, c2x);
 
-        this.set(gr1, gc1, 0); // Cell 1
-        this.set(gr2, gc2, 0); // Cell 2
-        this.set((gr1 + gr2) >> 1, (gc1 + gc2) >> 1, 0); // Wall between
+        this.set(gr1, gc1, 0);
+        this.set(gr2, gc2, 0);
+        this.set((gr1 + gr2) >> 1, (gc1 + gc2) >> 1, 0);
       }
 
       inBounds(r, c) { return r >= 0 && r < this.h && c >= 0 && c < this.w; }
@@ -558,7 +554,7 @@
       controls.dampingFactor = 0.05;
 
       fpsControls = new PointerLockControls(camera, document.body);
-      fpsControls.addEventListener('lock', () => { isGameMode = true; });
+      fpsControls.addEventListener('lock', () => { isGameMode = true; updateFog(); });
       fpsControls.addEventListener('unlock', () => {
         if (isGameMode) {
           // Just paused
@@ -579,6 +575,14 @@
       animate();
     }
 
+    function updateFog() {
+      if (isGameMode) {
+        scene.fog.density = 0.15; // Dense fog for game mode
+      } else {
+        scene.fog.density = 0.02; // Light fog for orbit
+      }
+    }
+
     function animate() {
       requestAnimationFrame(animate);
 
@@ -594,25 +598,37 @@
     // --- RENDERING MAZE ---
     function renderMazeFull(m) {
       if (wallInstancedMesh) scene.remove(wallInstancedMesh);
-      if (floorMesh) scene.remove(floorMesh);
+      if (floorInstancedMesh) scene.remove(floorInstancedMesh);
 
-      const geometry = new THREE.BoxGeometry(CELL_SIZE, WALL_HEIGHT, CELL_SIZE);
-      const material = new THREE.MeshStandardMaterial({
+      // Wall Mesh
+      const wallGeo = new THREE.BoxGeometry(CELL_SIZE, WALL_HEIGHT, CELL_SIZE);
+      const wallMat = new THREE.MeshStandardMaterial({
         color: 0x1e293b,
         roughness: 0.2,
         metalness: 0.5
       });
 
-      // Count walls
-      let wallCount = 0;
-      for (let i = 0; i < m.data.length; i++) if (m.data[i] === 1) wallCount++;
+      // Floor Mesh (Instanced for Heatmap support)
+      const floorGeo = new THREE.PlaneGeometry(CELL_SIZE, CELL_SIZE);
+      const floorMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8 });
 
-      wallInstancedMesh = new THREE.InstancedMesh(geometry, material, wallCount);
+      // Count walls and floors
+      let wallCount = 0;
+      let floorCount = 0;
+      for (let i = 0; i < m.data.length; i++) {
+        if (m.data[i] === 1) wallCount++;
+        else floorCount++;
+      }
+
+      wallInstancedMesh = new THREE.InstancedMesh(wallGeo, wallMat, wallCount);
       wallInstancedMesh.castShadow = true;
       wallInstancedMesh.receiveShadow = true;
 
+      floorInstancedMesh = new THREE.InstancedMesh(floorGeo, floorMat, floorCount);
+      floorInstancedMesh.receiveShadow = true;
+
       const dummy = new THREE.Object3D();
-      let idx = 0;
+      let wIdx = 0, fIdx = 0;
 
       // Center the maze
       const offsetX = -(m.gw * CELL_SIZE) / 2;
@@ -620,24 +636,25 @@
 
       for (let r = 0; r < m.gh; r++) {
         for (let c = 0; c < m.gw; c++) {
-          if (m.data[r * m.gw + c] === 1) {
+          const val = m.data[r * m.gw + c];
+          if (val === 1) {
             dummy.position.set(c * CELL_SIZE + offsetX, WALL_HEIGHT / 2, r * CELL_SIZE + offsetZ);
+            dummy.rotation.set(0, 0, 0);
             dummy.updateMatrix();
-            wallInstancedMesh.setMatrixAt(idx++, dummy.matrix);
+            wallInstancedMesh.setMatrixAt(wIdx++, dummy.matrix);
+          } else {
+            dummy.position.set(c * CELL_SIZE + offsetX, 0, r * CELL_SIZE + offsetZ);
+            dummy.rotation.set(-Math.PI / 2, 0, 0);
+            dummy.updateMatrix();
+            floorInstancedMesh.setMatrixAt(fIdx++, dummy.matrix);
+            // Store grid coord in userData for heatmap mapping if needed, but InstancedMesh doesn't support userData per instance easily.
+            // We will map index back to coord if needed, or just iterate grid again for heatmap.
           }
         }
       }
 
       scene.add(wallInstancedMesh);
-
-      // Floor
-      const floorGeo = new THREE.PlaneGeometry(m.gw * CELL_SIZE, m.gh * CELL_SIZE);
-      const floorMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.8 });
-      floorMesh = new THREE.Mesh(floorGeo, floorMat);
-      floorMesh.rotation.x = -Math.PI / 2;
-      floorMesh.position.y = 0;
-      floorMesh.receiveShadow = true;
-      scene.add(floorMesh);
+      scene.add(floorInstancedMesh);
 
       // Adjust Camera
       if (!isGameMode) {
@@ -645,15 +662,6 @@
         camera.position.set(0, Math.max(m.gw, m.gh) * 1.2, Math.max(m.gw, m.gh) * 0.8);
         controls.update();
       }
-    }
-
-    function updateCellVisual(r, c, type) {
-      // For real-time updates, we might need a different approach than InstancedMesh for walls if walls are changing.
-      // Since walls are REMOVED, we can just scale them to 0 in the instanced mesh?
-      // Or simpler: Just re-render the whole mesh every N frames or use a dynamic group for "walls being removed".
-      // For this demo, we will re-render full maze periodically or use a separate system for "active generation".
-      // Actually, let's just use simple meshes for the "active" part and bake later? 
-      // Optimization: We will just re-generate the InstancedMesh every batch.
     }
 
     // --- ALGORITHMS ---
@@ -687,7 +695,6 @@
 
       const algo = ui.genSelect.value;
       const speed = parseInt(ui.speed.value);
-      const delay = Math.max(1, 50 - speed);
 
       // Helper to visualize
       let batch = 0;
@@ -703,6 +710,7 @@
       else if (algo === 'prim') await genPrim(maze, updateVis, signal);
       else if (algo === 'wilson') await genWilson(maze, updateVis, signal);
       else if (algo === 'growing') await genGrowing(maze, updateVis, signal);
+      else if (algo === 'caves') await genCaves(maze, updateVis, signal);
 
       renderMazeFull(maze);
       calcStats(maze);
@@ -736,12 +744,10 @@
     }
 
     async function genPrim(m, update, signal) {
-      // Randomized Prim's
       const walls = [];
       const visited = new Set(['0,0']);
       m.set(1, 1, 0);
 
-      // Add walls of (0,0)
       [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dr, dc]) => {
         const nr = 0 + dr, nc = 0 + dc;
         if (m.inBounds(nr, nc)) walls.push([[0, 0], [nr, nc]]);
@@ -775,7 +781,6 @@
       const unvisited = new Set();
       for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) unvisited.add(`${r},${c}`);
 
-      // Pick random start, mark visited
       const first = [...unvisited][Math.floor(rng() * unvisited.size)];
       unvisited.delete(first);
       const [fr, fc] = first.split(',').map(Number);
@@ -784,37 +789,12 @@
       while (unvisited.size > 0) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
 
-        let currKey = [...unvisited][Math.floor(rng() * unvisited.size)];
-        let [cr, cc] = currKey.split(',').map(Number);
-        let path = { [currKey]: null }; // Map for loop erasure
-
-        // Random walk until we hit visited
-        while (unvisited.has(currKey)) {
-          const nbrs = [];
-          [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dr, dc]) => {
-            const nr = cr + dr, nc = cc + dc;
-            if (m.inBounds(nr, nc)) nbrs.push([nr, nc]);
-          });
-          const next = nbrs[Math.floor(rng() * nbrs.length)];
-          const nextKey = `${next[0]},${next[1]}`;
-          path[currKey] = next;
-          currKey = nextKey;
-          [cr, cc] = next;
-        }
-
-        // Carve path
-        let walkKey = Object.keys(path)[0]; // Start of this walk
-        // Wait, we need to start from the random start of the walk
-        // Actually, we need to reconstruct from the start of the walk
-        // Let's restart the walk logic slightly to be cleaner
-        // ... Simplified Wilson:
         let u = [...unvisited][Math.floor(rng() * unvisited.size)];
         let [ur, uc] = u.split(',').map(Number);
         let currentPath = [[ur, uc]];
 
         while (unvisited.has(`${currentPath[currentPath.length - 1][0]},${currentPath[currentPath.length - 1][1]}`)) {
           let [lr, lc] = currentPath[currentPath.length - 1];
-          // Random move
           const nbrs = [];
           [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dr, dc]) => {
             const nr = lr + dr, nc = lc + dc;
@@ -822,16 +802,14 @@
           });
           const next = nbrs[Math.floor(rng() * nbrs.length)];
 
-          // Check loop
           const idx = currentPath.findIndex(p => p[0] === next[0] && p[1] === next[1]);
           if (idx !== -1) {
-            currentPath = currentPath.slice(0, idx + 1); // Erase loop
+            currentPath = currentPath.slice(0, idx + 1);
           } else {
             currentPath.push(next);
           }
         }
 
-        // Carve
         for (let i = 0; i < currentPath.length - 1; i++) {
           m.removeWall(currentPath[i], currentPath[i + 1]);
           unvisited.delete(`${currentPath[i][0]},${currentPath[i][1]}`);
@@ -849,7 +827,6 @@
           if (c + 1 < m.w) edges.push([[r, c], [r, c + 1]]);
         }
       }
-      // Shuffle
       for (let i = edges.length - 1; i > 0; i--) {
         const j = Math.floor(rng() * (i + 1));
         [edges[i], edges[j]] = [edges[j], edges[i]];
@@ -875,7 +852,6 @@
     }
 
     async function genGrowing(m, update, signal) {
-      // Growing Tree with 50/50 split (Prim/DFS mix)
       const visited = new Set(['0,0']);
       const active = [[0, 0]];
       m.set(1, 1, 0);
@@ -904,26 +880,72 @@
       }
     }
 
+    async function genCaves(m, update, signal) {
+      // Cellular Automata
+      // 1. Random fill
+      for (let r = 1; r < m.gh - 1; r++) {
+        for (let c = 1; c < m.gw - 1; c++) {
+          m.set(r, c, (rng() < 0.45) ? 1 : 0);
+        }
+      }
+      await update();
+
+      // 2. Smoothing
+      const iterations = 5;
+      for (let i = 0; i < iterations; i++) {
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+        const nextGrid = new Int8Array(m.data);
+        for (let r = 1; r < m.gh - 1; r++) {
+          for (let c = 1; c < m.gw - 1; c++) {
+            let walls = 0;
+            for (let dr = -1; dr <= 1; dr++) {
+              for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                if (m.get(r + dr, c + dc) === 1) walls++;
+              }
+            }
+            if (walls > 4) nextGrid[r * m.gw + c] = 1;
+            else if (walls < 4) nextGrid[r * m.gw + c] = 0;
+          }
+        }
+        m.data = nextGrid;
+        await update();
+      }
+    }
+
     // Solvers
     async function solveMaze(signal) {
       if (!maze) return;
-
-      // Clear old path
       pathMeshGroup.clear();
 
       const algo = ui.solveSelect.value;
-      const start = [1, 1]; // Grid coords
-      const goal = [maze.gh - 2, maze.gw - 2];
+      // Find valid start/goal for caves
+      let start = [1, 1];
+      let goal = [maze.gh - 2, maze.gw - 2];
 
-      // Ensure start/goal are 0
-      if (maze.get(start[0], start[1]) !== 0) { ui.status.innerText = "Invalid Start"; return; }
+      // Search for valid start/goal if current are walls
+      if (maze.get(start[0], start[1]) !== 0) {
+        for (let r = 1; r < maze.gh; r++) {
+          for (let c = 1; c < maze.gw; c++) {
+            if (maze.get(r, c) === 0) { start = [r, c]; break; }
+          }
+          if (maze.get(start[0], start[1]) === 0) break;
+        }
+      }
+      if (maze.get(goal[0], goal[1]) !== 0) {
+        for (let r = maze.gh - 2; r > 0; r--) {
+          for (let c = maze.gw - 2; c > 0; c--) {
+            if (maze.get(r, c) === 0) { goal = [r, c]; break; }
+          }
+          if (maze.get(goal[0], goal[1]) === 0) break;
+        }
+      }
 
       let path = [];
-
       if (algo === 'bfs') path = await bfs(maze, start, goal, signal);
       else if (algo === 'astar') path = await astar(maze, start, goal, signal);
       else if (algo === 'bibfs') path = await bibfs(maze, start, goal, signal);
-      else if (algo === 'dijkstra') path = await bfs(maze, start, goal, signal); // Dijkstra is BFS on unweighted
+      else if (algo === 'dijkstra') path = await bfs(maze, start, goal, signal);
 
       if (path) drawPath3D(path);
       ui.pathLen.innerText = path ? path.length : "No Path";
@@ -934,13 +956,11 @@
       const parent = new Map();
       parent.set(start.toString(), null);
       const visited = new Set([start.toString()]);
-
       const speed = parseInt(ui.speed.value);
       let count = 0;
 
       while (q.length > 0) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-
         const curr = q.shift();
         if (curr[0] === goal[0] && curr[1] === goal[1]) return reconstruct(parent, curr);
 
@@ -952,12 +972,7 @@
             visited.add(key);
             parent.set(key, curr);
             q.push([nr, nc]);
-
-            // Visualize search
-            if (count++ % speed === 0) {
-              drawPoint(nr, nc, 0x06b6d4);
-              await sleep(5);
-            }
+            if (count++ % speed === 0) { drawPoint(nr, nc, 0x06b6d4); await sleep(5); }
           }
         }
       }
@@ -965,25 +980,20 @@
     }
 
     async function astar(m, start, goal, signal) {
-      // Simple Priority Queue would be better, but array sort is okay for demo size
       const open = [{ pos: start, f: 0, g: 0 }];
       const parent = new Map();
       const visited = new Set();
-
       const h = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
       const speed = parseInt(ui.speed.value);
       let count = 0;
 
       while (open.length > 0) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-
         open.sort((a, b) => a.f - b.f);
         const { pos: curr, g } = open.shift();
         const key = curr.toString();
-
         if (visited.has(key)) continue;
         visited.add(key);
-
         if (curr[0] === goal[0] && curr[1] === goal[1]) return reconstruct(parent, curr);
 
         const nbrs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
@@ -993,11 +1003,7 @@
           if (nr >= 0 && nr < m.gh && nc >= 0 && nc < m.gw && m.get(nr, nc) === 0 && !visited.has(nKey)) {
             parent.set(nKey, curr);
             open.push({ pos: [nr, nc], g: g + 1, f: g + 1 + h([nr, nc], goal) });
-
-            if (count++ % speed === 0) {
-              drawPoint(nr, nc, 0x8b5cf6);
-              await sleep(5);
-            }
+            if (count++ % speed === 0) { drawPoint(nr, nc, 0x8b5cf6); await sleep(5); }
           }
         }
       }
@@ -1010,14 +1016,11 @@
       const p2 = new Map([[goal.toString(), null]]);
       const v1 = new Set([start.toString()]);
       const v2 = new Set([goal.toString()]);
-
       const speed = parseInt(ui.speed.value);
       let count = 0;
 
       while (q1.length > 0 && q2.length > 0) {
         if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-
-        // Step 1
         if (q1.length > 0) {
           const c1 = q1.shift();
           const nbrs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
@@ -1033,8 +1036,6 @@
             }
           }
         }
-
-        // Step 2
         if (q2.length > 0) {
           const c2 = q2.shift();
           const nbrs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
@@ -1070,6 +1071,55 @@
       return path1.slice(0, -1).concat(path2.reverse());
     }
 
+    // --- HEATMAP ---
+    async function showHeatmap() {
+      if (!maze || !floorInstancedMesh) return;
+
+      // BFS from valid start
+      let start = [1, 1];
+      if (maze.get(start[0], start[1]) !== 0) {
+        for (let r = 1; r < maze.gh; r++) for (let c = 1; c < maze.gw; c++) if (maze.get(r, c) === 0) { start = [r, c]; break; }
+      }
+
+      const dists = new Int32Array(maze.gw * maze.gh).fill(-1);
+      const q = [start];
+      dists[start[0] * maze.gw + start[1]] = 0;
+      let maxDist = 0;
+
+      while (q.length > 0) {
+        const [r, c] = q.shift();
+        const d = dists[r * maze.gw + c];
+        if (d > maxDist) maxDist = d;
+
+        [[0, 1], [0, -1], [1, 0], [-1, 0]].forEach(([dr, dc]) => {
+          const nr = r + dr, nc = c + dc;
+          if (nr >= 0 && nr < maze.gh && nc >= 0 && nc < maze.gw && maze.get(nr, nc) === 0 && dists[nr * maze.gw + nc] === -1) {
+            dists[nr * maze.gw + nc] = d + 1;
+            q.push([nr, nc]);
+          }
+        });
+      }
+
+      // Update colors
+      let fIdx = 0;
+      const color = new THREE.Color();
+      for (let r = 0; r < maze.gh; r++) {
+        for (let c = 0; c < maze.gw; c++) {
+          if (maze.get(r, c) === 0) {
+            const d = dists[r * maze.gw + c];
+            if (d !== -1) {
+              const t = d / maxDist;
+              color.setHSL(0.6 - t * 0.6, 1, 0.5); // Blue to Red
+            } else {
+              color.setHex(0x0f172a);
+            }
+            floorInstancedMesh.setColorAt(fIdx++, color);
+          }
+        }
+      }
+      floorInstancedMesh.instanceColor.needsUpdate = true;
+    }
+
     // --- VISUALIZATION HELPERS ---
     function drawPoint(r, c, color) {
       const geo = new THREE.BoxGeometry(CELL_SIZE * 0.8, 0.5, CELL_SIZE * 0.8);
@@ -1100,8 +1150,8 @@
     function calcStats(m) {
       let deadEnds = 0;
       let passages = 0;
-      for (let r = 1; r < m.gh - 1; r += 2) {
-        for (let c = 1; c < m.gw - 1; c += 2) {
+      for (let r = 1; r < m.gh - 1; r++) {
+        for (let c = 1; c < m.gw - 1; c++) {
           if (m.get(r, c) === 0) {
             passages++;
             let exits = 0;
@@ -1114,7 +1164,7 @@
         }
       }
       ui.cells.innerText = passages;
-      ui.deadEnds.innerText = Math.round((deadEnds / passages) * 100) + '%';
+      ui.deadEnds.innerText = passages ? Math.round((deadEnds / passages) * 100) + '%' : '0%';
     }
 
     // --- GAME LOGIC ---
@@ -1144,7 +1194,7 @@
     function updateGameLogic() {
       if (!isGameMode) return;
 
-      const delta = 0.015; // Fixed step for simplicity
+      const delta = 0.015;
       const speed = moveState.run ? 15.0 : 8.0;
 
       velocity.x -= velocity.x * 10.0 * delta;
@@ -1160,37 +1210,33 @@
       fpsControls.moveRight(-velocity.x * delta);
       fpsControls.moveForward(-velocity.z * delta);
 
-      // Collision Detection (Simple Grid Check)
       const pos = camera.position;
       const offsetX = -(maze.gw * CELL_SIZE) / 2;
       const offsetZ = -(maze.gh * CELL_SIZE) / 2;
 
-      // Convert world pos to grid pos
       const gx = Math.round((pos.x - offsetX) / CELL_SIZE);
       const gz = Math.round((pos.z - offsetZ) / CELL_SIZE);
 
-      // Check bounds and walls
       if (gx < 0 || gx >= maze.gw || gz < 0 || gz >= maze.gh || maze.get(gz, gx) === 1) {
-        // Push back (very simple)
         camera.position.x -= -velocity.x * delta;
         camera.position.z -= -velocity.z * delta;
         velocity.set(0, 0, 0);
       }
 
-      // Check Goal
       const goalX = maze.gw - 2;
       const goalZ = maze.gh - 2;
       if (Math.abs(gx - goalX) < 2 && Math.abs(gz - goalZ) < 2) {
         ui.gameOverlay.style.display = 'block';
         document.exitPointerLock();
         isGameMode = false;
+        updateFog();
       }
     }
 
     window.exitGameMode = () => {
       ui.gameOverlay.style.display = 'none';
       isGameMode = false;
-      // Reset camera
+      updateFog();
       controls.target.set(0, 0, 0);
       camera.position.set(0, 40, 40);
       controls.update();
@@ -1200,22 +1246,28 @@
     document.getElementById('genBtn').onclick = () => runTask(generateMaze);
     document.getElementById('stopBtn').onclick = () => { if (abortController) abortController.abort(); };
     document.getElementById('solveBtn').onclick = () => runTask(solveMaze);
-    document.getElementById('clearBtn').onclick = () => pathMeshGroup.clear();
+    document.getElementById('heatmapBtn').onclick = () => showHeatmap();
+    document.getElementById('clearBtn').onclick = () => { pathMeshGroup.clear(); floorInstancedMesh.instanceColor = null; floorInstancedMesh.setColorAt(0, new THREE.Color(0x0f172a)); renderMazeFull(maze); };
 
     document.getElementById('viewOrbit').onclick = () => {
       isGameMode = false;
       document.exitPointerLock();
       controls.enabled = true;
+      updateFog();
     };
     document.getElementById('viewFPS').onclick = () => {
       if (!maze) return;
       isGameMode = true;
       controls.enabled = false;
 
-      // Teleport to start
+      let start = [1, 1];
+      if (maze.get(1, 1) !== 0) {
+        for (let r = 1; r < maze.gh; r++) for (let c = 1; c < maze.gw; c++) if (maze.get(r, c) === 0) { start = [r, c]; break; }
+      }
+
       const offsetX = -(maze.gw * CELL_SIZE) / 2;
       const offsetZ = -(maze.gh * CELL_SIZE) / 2;
-      camera.position.set(1 * CELL_SIZE + offsetX, 1.5, 1 * CELL_SIZE + offsetZ);
+      camera.position.set(start[1] * CELL_SIZE + offsetX, 1.5, start[0] * CELL_SIZE + offsetZ);
 
       fpsControls.lock();
     };
