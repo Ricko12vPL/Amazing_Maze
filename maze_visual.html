@@ -956,7 +956,7 @@
             visited.add(key);
             parent.set(key, curr);
             q.push([nr, nc]);
-            if (count++ % speed === 0) { highlightCell(nr, nc, 0x004400); await sleep(5); }
+            if (count++ % speed === 0) { highlightCell(nr, nc, 0x008800); await sleep(5); }
           }
         }
       }
@@ -987,7 +987,7 @@
           if (nr >= 0 && nr < m.gh && nc >= 0 && nc < m.gw && m.get(nr, nc) === 0 && !visited.has(nKey)) {
             parent.set(nKey, curr);
             open.push({ pos: [nr, nc], g: g + 1, f: g + 1 + h([nr, nc], goal) });
-            if (count++ % speed === 0) { highlightCell(nr, nc, 0x004400); await sleep(5); }
+            if (count++ % speed === 0) { highlightCell(nr, nc, 0x008800); await sleep(5); }
           }
         }
       }
@@ -1016,7 +1016,7 @@
               p1.set(key, c1);
               q1.push([nr, nc]);
               if (v2.has(key)) return mergePaths(p1, p2, [nr, nc]);
-              if (count++ % speed === 0) { highlightCell(nr, nc, 0x004400); await sleep(5); }
+              if (count++ % speed === 0) { highlightCell(nr, nc, 0x008800); await sleep(5); }
             }
           }
         }
@@ -1031,7 +1031,7 @@
               p2.set(key, c2);
               q2.push([nr, nc]);
               if (v1.has(key)) return mergePaths(p1, p2, [nr, nc]);
-              if (count++ % speed === 0) { highlightCell(nr, nc, 0x004400); await sleep(5); }
+              if (count++ % speed === 0) { highlightCell(nr, nc, 0x008800); await sleep(5); }
             }
           }
         }
